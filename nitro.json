@@ -1,0 +1,32 @@
+{
+    "$schema": "https://nitro.margelo.com/nitro.schema.json",
+    "cxxNamespace": [
+        "node_fs"
+    ],
+    "ios": {
+        "iosModuleName": "RNNodeFileSystem"
+    },
+    "android": {
+        "androidNamespace": [
+            "node_fs"
+        ],
+        "androidCxxLibName": "RNNodeFileSystem"
+    },
+    "autolinking": {
+        "NitroNodeFileSystem": {
+            "cpp": "HybridFileSystem"
+        }
+    },
+    "cxx": {
+        "extraIncludeDirs": [
+            "./cpp",
+            "../../packages/rust_c_file_system_lib/include"
+        ],
+        "extraLibs": [
+            "rn_file_system"
+        ],
+        "extraLibDirs": [
+            "../../packages/rust_c_file_system_lib/target/release"
+        ]
+    }
+}
