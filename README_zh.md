@@ -10,6 +10,16 @@
 - 🏗️ **流式支持**：内置 `ReadStream` 和 `WriteStream`，适用于大数据流处理。
 - 📂 **目录与监听**：支持目录迭代查询及文件系统变更监听。
 
+## 与其他库的对比
+
+| 特性 | `react-native-fs` | `expo-file-system` | `react-native-blob-util` | **Nitro File System** |
+| :--- | :--- | :--- | :--- | :--- |
+| **底层架构** | 传统 Bridge | Turbo Modules / Expo | Legacy Bridge / C++ | **Nitro (JSI / C++)** |
+| **通信开销** | 高 (Base64/JSON) | 中 | 中 | **极低 (直接 JSI)** |
+| **二进制处理** | 慢 (Base64) | 快 | 快 | **顶级 (零拷贝 Buffer)** |
+| **API 风格** | 自定义 | 自定义 | 流 / 混合 | **兼容 Node.js `fs`** |
+| **同步 API** | 支持较差 | 不支持 | 受限支持 | **全面支持** |
+
 ## 安装
 
 ```sh
@@ -17,6 +27,19 @@ npm install react-native-nitro-file-system react-native-nitro-modules react-nati
 # 或
 yarn add react-native-nitro-file-system react-native-nitro-modules react-native-nitro-buffer
 ```
+
+## API 兼容性表
+
+| 类别 | 状态 | 支持的方法 |
+| :--- | :--- | :--- |
+| **文件 I/O** | ✅ 100% | `open`, `read`, `write`, `close`, `readFile`, `writeFile`, `appendFile`, `truncate`, `fsync`, `readv`, `writev` |
+| **元数据** | ✅ 100% | `stat`, `lstat`, `fstat`, `access`, `utimes`, `futimes`, `lutimes` (支持 `bigint`) |
+| **目录操作** | ✅ 100% | `mkdir`, `rmdir`, `readdir`, `rm`, `mkdtemp`, `opendir` (`Dir` 类) |
+| **权限管理** | ✅ 100% | `chmod`, `fchmod`, `lchmod`, `chown`, `fchown`, `lchown` |
+| **链接** | ✅ 100% | `link`, `symlink`, `readlink`, `realpath` |
+| **文件监听** | ✅ 100% | `watch`, `watchFile`, `unwatchFile` |
+| **流式处理** | ✅ 100% | `createReadStream`, `createWriteStream` |
+| **Promises** | ✅ 100% | `fs.promises.*` (全功能覆盖) |
 
 ## 基础用法
 
