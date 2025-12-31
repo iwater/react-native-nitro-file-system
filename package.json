@@ -1,12 +1,13 @@
 {
   "name": "react-native-nitro-file-system",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "High-performance Node.js-compatible file system (fs) for React Native, powered by Nitro (JSI/C++) for zero-copy binary data handling and near-native speeds.",
   "repository": {
     "type": "git",
     "url": "https://github.com/iwater/react-native-nitro-file-system.git"
   },
   "homepage": "https://github.com/iwater/react-native-nitro-file-system",
+  "type": "module",
   "main": "lib/index.js",
   "module": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -14,9 +15,10 @@
     "build": "tsc",
     "test": "jest",
     "prepublishOnly": "npm run build",
-    "copy-clib": "rm -rf ios/Frameworks/RustFileSystem.xcframework && cp -R ../rust_c_file_system_lib/target/xcframework/RustFileSystem.xcframework ios/Frameworks/ && mkdir -p android/libs/arm64-v8a android/libs/armeabi-v7a android/libs/x86 android/libs/x86_64 && cp ../rust_c_file_system_lib/target/universal/android/arm64-v8a/librn_file_system.so android/libs/arm64-v8a/ && cp ../rust_c_file_system_lib/target/universal/android/armeabi-v7a/librn_file_system.so android/libs/armeabi-v7a/ && cp ../rust_c_file_system_lib/target/universal/android/x86/librn_file_system.so android/libs/x86/ && cp ../rust_c_file_system_lib/target/universal/android/x86_64/librn_file_system.so android/libs/x86_64/ && cp ../rust_c_file_system_lib/include/rust_c_file_system.h cpp/",
+    "copy-clib": "npm run copy-clib-android && npm run copy-clib-ios && npm run copy-clib-mac",
     "copy-clib-ios": "rm -rf ios/Frameworks/RustFileSystem.xcframework && cp -R ../rust_c_file_system_lib/target/xcframework/RustFileSystem.xcframework ios/Frameworks/",
-    "copy-clib-android": "mkdir -p android/libs/arm64-v8a android/libs/armeabi-v7a android/libs/x86 android/libs/x86_64 && cp ../rust_c_file_system_lib/target/universal/android/arm64-v8a/librn_file_system.so android/libs/arm64-v8a/ && cp ../rust_c_file_system_lib/target/universal/android/armeabi-v7a/librn_file_system.so android/libs/armeabi-v7a/ && cp ../rust_c_file_system_lib/target/universal/android/x86/librn_file_system.so android/libs/x86/ && cp ../rust_c_file_system_lib/target/universal/android/x86_64/librn_file_system.so android/libs/x86_64/ && cp ../rust_c_file_system_lib/include/rust_c_file_system.h cpp/"
+    "copy-clib-android": "mkdir -p android/libs/arm64-v8a android/libs/armeabi-v7a android/libs/x86 android/libs/x86_64 && cp ../rust_c_file_system_lib/target/universal/android/arm64-v8a/librn_file_system.so android/libs/arm64-v8a/ && cp ../rust_c_file_system_lib/target/universal/android/armeabi-v7a/librn_file_system.so android/libs/armeabi-v7a/ && cp ../rust_c_file_system_lib/target/universal/android/x86/librn_file_system.so android/libs/x86/ && cp ../rust_c_file_system_lib/target/universal/android/x86_64/librn_file_system.so android/libs/x86_64/ && cp ../rust_c_file_system_lib/include/rust_c_file_system.h cpp/",
+    "copy-clib-mac": "mkdir -p mac && cp ../rust_c_file_system_lib/target/release/librn_file_system.a mac/ && cp ../rust_c_file_system_lib/include/rust_c_file_system.h cpp/"
   },
   "keywords": [
     "react-native",
@@ -44,7 +46,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "react-native-nitro-buffer": "^0.0.11",
+    "react-native-nitro-buffer": "~0.0.14",
     "readable-stream": "^4.7.0"
   },
   "packageManager": "yarn@4.12.0",

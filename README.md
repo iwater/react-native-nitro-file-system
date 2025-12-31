@@ -2,6 +2,11 @@
 
 A high-performance, Node.js-compatible file system (fs) module for React Native, powered by [Nitro Modules](https://github.com/mrousavy/nitro).
 
+[![license](https://img.shields.io/badge/license-ISC-blue.svg)](https://github.com/iwater/rn-http-server/blob/main/LICENSE)
+[![platform](https://img.shields.io/badge/platform-ios%20%7C%20android-lightgrey.svg)]()
+[![compatibility](https://img.shields.io/badge/Node.js-100%25%20fs-green.svg)]()
+[中文文档](./README_zh.md)
+
 ## Features
 
 - 🚀 **Extreme Performance**: Low-overhead communication via JSI and Nitro.

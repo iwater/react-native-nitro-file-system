@@ -19,14 +19,12 @@
     },
     "cxx": {
         "extraIncludeDirs": [
-            "./cpp",
-            "../../packages/rust_c_file_system_lib/include"
+            "./cpp"
         ],
         "extraLibs": [
             "rn_file_system"
         ],
         "extraLibDirs": [
-            "../../packages/rust_c_file_system_lib/target/release"
         ]
     }
 }
