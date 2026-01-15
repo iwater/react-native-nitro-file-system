@@ -1,6 +1,7 @@
 import { Writable, WritableOptions } from 'readable-stream';
 import { NitroFileSystem } from './native';
 import { Buffer } from 'react-native-nitro-buffer';
+import { getFlags } from './index';
 
 export interface WriteStreamOptions extends WritableOptions {
     flags?: string;
@@ -54,12 +55,7 @@ export class WriteStream extends Writable {
     }
 
     _open() {
-        // TODO: Import getFlags from a shared util to avoid duplication
-        // For now, simple mapping
-        let flagNum = 1 | 64 | 512; // O_WRONLY | O_CREAT | O_TRUNC (w)
-        if (this.flags === 'w') flagNum = 1 | 64 | 512;
-        else if (this.flags === 'a') flagNum = 1 | 64 | 1024; // O_WRONLY | O_CREAT | O_APPEND
-        // ... extend as needed
+        const flagNum = getFlags(this.flags);
 
         try {
             if (typeof this.path !== 'string') throw new Error("Path must be string");

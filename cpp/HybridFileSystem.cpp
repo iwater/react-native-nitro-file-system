@@ -2,9 +2,17 @@
 #include "HybridDirIterator.hpp"
 #include "HybridFileWatcher.hpp"
 #include "rust_c_file_system.h"
+#include <fcntl.h>
 #include <iostream>
 #include <string>
 #include <sys/stat.h>
+
+#ifdef __ANDROID__
+#include <jni.h>
+namespace margelo::nitro::node_fs {
+JNIEnv *getJNIEnv();
+}
+#endif
 
 namespace margelo::nitro::node_fs {
 
@@ -19,6 +27,53 @@ Stats toStats(const RNStats &s) {
 
 double HybridFileSystem::open(const std::string &path, double flags,
                               double mode) {
+#ifdef __ANDROID__
+  if (path.find("content://") == 0) {
+    JNIEnv *env = getJNIEnv();
+    if (env) {
+      jclass cls =
+          env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+      if (cls) {
+        jmethodID mid = env->GetStaticMethodID(
+            cls, "openContentUri", "(Ljava/lang/String;Ljava/lang/String;)I");
+        if (mid) {
+          jstring jUri = env->NewStringUTF(path.c_str());
+
+          // Map O_ flags to string mode "r", "w", "rw"
+          std::string modeStr = "r";
+          int flagsInt = static_cast<int>(flags);
+          if ((flagsInt & O_RDWR) == O_RDWR) {
+            modeStr = "rw";
+          } else if ((flagsInt & O_WRONLY) == O_WRONLY) {
+            modeStr = "w";
+          }
+          // Truncate logic is implicit in "w" usually for file streams but for
+          // FD/ParcelFileDescriptor "w" or "rw" might not truncate
+          // automatically unless specified. Android PFD modes: "r", "w", "wt",
+          // "wa", "rw", "rwt". Simplification:
+          if ((flagsInt & O_TRUNC) == O_TRUNC &&
+              (flagsInt & (O_RDWR | O_WRONLY))) {
+            modeStr += "t";
+          }
+
+          jstring jMode = env->NewStringUTF(modeStr.c_str());
+          int fd = env->CallStaticIntMethod(cls, mid, jUri, jMode);
+          if (fd >= 0) {
+            rn_fs_import_fd(fd);
+          }
+
+          env->DeleteLocalRef(jUri);
+          env->DeleteLocalRef(jMode);
+          env->DeleteLocalRef(cls);
+
+          if (fd >= 0)
+            return static_cast<double>(fd);
+        }
+      }
+    }
+    throw std::runtime_error("Failed to open content URI: " + path);
+  }
+#endif
   return rn_fs_open(path.c_str(), static_cast<int>(flags),
                     static_cast<int>(mode));
 }
@@ -57,6 +112,26 @@ double HybridFileSystem::write(double fd,
 }
 
 void HybridFileSystem::access(const std::string &path, double mode) {
+#ifdef __ANDROID__
+  if (path.find("content://") == 0) {
+    JNIEnv *env = getJNIEnv();
+    if (env) {
+      jclass cls =
+          env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+      jmethodID mid = env->GetStaticMethodID(cls, "existsContentUri",
+                                             "(Ljava/lang/String;)Z");
+      if (mid) {
+        jstring jUri = env->NewStringUTF(path.c_str());
+        bool exists = env->CallStaticBooleanMethod(cls, mid, jUri);
+        env->DeleteLocalRef(jUri);
+        env->DeleteLocalRef(cls);
+        if (exists)
+          return;
+      }
+    }
+    throw std::runtime_error("access failed: " + path);
+  }
+#endif
   if (rn_fs_access(path.c_str(), static_cast<int>(mode)) != 0) {
     throw std::runtime_error("access failed: " + path);
   }
@@ -165,6 +240,11 @@ std::string HybridFileSystem::readlink(const std::string &path) {
 }
 
 std::string HybridFileSystem::realpath(const std::string &path) {
+#ifdef __ANDROID__
+  if (path.find("content://") == 0) {
+    return path;
+  }
+#endif
   char *res = rn_fs_realpath(path.c_str());
   if (res == nullptr) {
     throw std::runtime_error("realpath failed: " + path);
@@ -185,6 +265,12 @@ std::string HybridFileSystem::mkdtemp(const std::string &prefix) {
 }
 
 void HybridFileSystem::rm(const std::string &path, bool recursive) {
+#ifdef __ANDROID__
+  if (path.find("content://") == 0) {
+    this->unlink(path);
+    return;
+  }
+#endif
   int res = rn_fs_rm(path.c_str(), recursive);
   if (res != 0) {
     // TODO: better error message based on errno?
@@ -193,6 +279,43 @@ void HybridFileSystem::rm(const std::string &path, bool recursive) {
 }
 
 Stats HybridFileSystem::stat(const std::string &path) {
+#ifdef __ANDROID__
+  if (path.find("content://") == 0) {
+    JNIEnv *env = getJNIEnv();
+    if (env) {
+      jclass cls =
+          env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+      if (cls) {
+        jmethodID mid = env->GetStaticMethodID(cls, "getStatContentUri",
+                                               "(Ljava/lang/String;)[D");
+        if (mid) {
+          jstring jUri = env->NewStringUTF(path.c_str());
+          jdoubleArray res =
+              (jdoubleArray)env->CallStaticObjectMethod(cls, mid, jUri);
+
+          env->DeleteLocalRef(jUri);
+          env->DeleteLocalRef(cls);
+
+          if (res) {
+            jdouble *statsData = env->GetDoubleArrayElements(res, nullptr);
+            double size = statsData[0];
+            double mtime = statsData[1];
+            env->ReleaseDoubleArrayElements(res, statsData, JNI_ABORT);
+            env->DeleteLocalRef(res);
+
+            RNStats s = {0};
+            s.size = static_cast<uint64_t>(size);
+            s.mtime_ms = mtime;
+            // Dummy values for others
+            s.mode = S_IFREG | 0444; // file, read-only assumption as fallback
+            return toStats(s);
+          }
+        }
+      }
+    }
+    throw std::runtime_error("Failed to stat content URI: " + path);
+  }
+#endif
   RNStats s;
   if (rn_fs_stat(path.c_str(), &s) == 0) {
     return toStats(s);
@@ -202,6 +325,12 @@ Stats HybridFileSystem::stat(const std::string &path) {
 }
 
 Stats HybridFileSystem::lstat(const std::string &path) {
+#ifdef __ANDROID__
+  if (path.find("content://") == 0) {
+    // For content URIs, lstat is equivalent to stat
+    return stat(path);
+  }
+#endif
   RNStats s;
   if (rn_fs_lstat(path.c_str(), &s) == 0) {
     return toStats(s);
@@ -248,6 +377,26 @@ std::vector<std::string> HybridFileSystem::readdir(const std::string &path) {
 }
 
 void HybridFileSystem::unlink(const std::string &path) {
+#ifdef __ANDROID__
+  if (path.find("content://") == 0) {
+    JNIEnv *env = getJNIEnv();
+    if (env) {
+      jclass cls =
+          env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+      jmethodID mid = env->GetStaticMethodID(cls, "deleteContentUri",
+                                             "(Ljava/lang/String;)Z");
+      if (mid) {
+        jstring jUri = env->NewStringUTF(path.c_str());
+        bool deleted = env->CallStaticBooleanMethod(cls, mid, jUri);
+        env->DeleteLocalRef(jUri);
+        env->DeleteLocalRef(cls);
+        if (deleted)
+          return;
+      }
+    }
+    throw std::runtime_error("unlink failed: " + path);
+  }
+#endif
   if (rn_fs_unlink(path.c_str()) != 0) {
     throw std::runtime_error("unlink failed: " + path);
   }
@@ -262,6 +411,35 @@ void HybridFileSystem::rename(const std::string &oldPath,
 
 void HybridFileSystem::copyFile(const std::string &src, const std::string &dest,
                                 double flags) {
+#ifdef __ANDROID__
+  if (src.find("content://") == 0 || dest.find("content://") == 0) {
+    JNIEnv *env = getJNIEnv();
+    if (env == nullptr) {
+      throw std::runtime_error("Failed to get JNIEnv for copyFile");
+    }
+
+    jclass utilsClass =
+        env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+    jmethodID copyMethod =
+        env->GetStaticMethodID(utilsClass, "copyContentUri",
+                               "(Ljava/lang/String;Ljava/lang/String;)Z");
+
+    jstring jSrc = env->NewStringUTF(src.c_str());
+    jstring jDest = env->NewStringUTF(dest.c_str());
+
+    jboolean success =
+        env->CallStaticBooleanMethod(utilsClass, copyMethod, jSrc, jDest);
+
+    env->DeleteLocalRef(jSrc);
+    env->DeleteLocalRef(jDest);
+    env->DeleteLocalRef(utilsClass);
+
+    if (!success) {
+      throw std::runtime_error("copyFile (content://) failed via JNI helper");
+    }
+    return;
+  }
+#endif
   if (rn_fs_copy_file(src.c_str(), dest.c_str(), static_cast<int>(flags)) !=
       0) {
     throw std::runtime_error("copyFile failed");
@@ -270,6 +448,55 @@ void HybridFileSystem::copyFile(const std::string &src, const std::string &dest,
 
 std::shared_ptr<ArrayBuffer>
 HybridFileSystem::readFile(const std::string &path) {
+#ifdef __ANDROID__
+  if (path.find("content://") == 0) {
+    // 1. Open
+    double fd = this->open(path, O_RDONLY, 0);
+    // 2. Stat size
+    RNStats stats;
+    if (rn_fs_fstat(static_cast<int>(fd), &stats) != 0) {
+      this->close(fd);
+      throw std::runtime_error("readFile(content://) fstat failed");
+    }
+    size_t len = static_cast<size_t>(stats.size);
+
+    // 3. Allocate buffer
+    // We can't use ArrayBuffer::copy directly from nullptr.
+    // We need to alloc temp buffer then copy?
+    // Or ArrayBuffer::wrap if we have a way to alloc via it?
+    // Nitro's ArrayBuffer likely copies data.
+    // Let's allocate raw, read, then wrap.
+    uint8_t *rawData = new uint8_t[len];
+
+    // 4. Read
+    // Loop to ensure full read? ContentResolver streams usually support atomic
+    // read but loop is safer.
+    size_t totalRead = 0;
+    while (totalRead < len) {
+      int r = rn_fs_read(static_cast<int>(fd), rawData + totalRead,
+                         len - totalRead, -1); // -1 for current pos
+      if (r < 0) {
+        delete[] rawData;
+        this->close(fd);
+        throw std::runtime_error("readFile(content://) read failed");
+      }
+      if (r == 0)
+        break; // EOF
+      totalRead += r;
+    }
+
+    // 5. Close
+    this->close(fd);
+
+    // 6. Wrap/Copy
+    // Nitro ArrayBuffer might take ownership or copy.
+    // ArrayBuffer::copy takes (data, len) and makes a copy.
+    auto buffer = ArrayBuffer::copy(rawData, totalRead);
+    delete[] rawData;
+    return buffer;
+  }
+#endif
+
   size_t len = 0;
   uint8_t *data = rn_fs_read_file(path.c_str(), &len);
   if (!data) {
@@ -286,6 +513,22 @@ void HybridFileSystem::writeFile(const std::string &path,
   if (!buffer) {
     throw std::runtime_error("buffer is null");
   }
+#ifdef __ANDROID__
+  if (path.find("content://") == 0) {
+    // 1. Open (write mode)
+    double fd = this->open(path, O_WRONLY | O_CREAT | O_TRUNC, 0);
+    // 2. Write
+    int r =
+        rn_fs_write(static_cast<int>(fd), buffer->data(), buffer->size(), -1);
+    // 3. Close
+    this->close(fd);
+
+    if (r < 0) {
+      throw std::runtime_error("writeFile(content://) failed");
+    }
+    return;
+  }
+#endif
   if (rn_fs_write_file(path.c_str(), buffer->data(), buffer->size()) != 0) {
     throw std::runtime_error("writeFile failed: " + path);
   }

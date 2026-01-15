@@ -1,6 +1,7 @@
 import { Readable, ReadableOptions } from 'readable-stream';
 import { NitroFileSystem } from './native';
 import { Buffer } from 'react-native-nitro-buffer';
+import { getFlags } from './index';
 
 export interface ReadStreamOptions extends ReadableOptions {
     flags?: string;
@@ -56,18 +57,7 @@ export class ReadStream extends Readable {
     }
 
     _open() {
-        // Translate flags to number for Rust
-        // Simulating sync Open for now, or use setImmediate but we need fd for _read
-        // Since _read is called by stream, we can open lazily or sync.
-
-        // We'll mimic fs.openSync behavior internally for now to simplify
-        // or actually, we should emit 'open' event asynchronously.
-
-        // Simple flag mapping (incomplete)
-        let flagNum = 0; // O_RDONLY
-        // ... (We really need the central getFlags helper from index.ts, maybe export it?)
-        if (this.flags === 'r') flagNum = 0;
-        // else ... assume 0 for now or implement proper parsing
+        const flagNum = getFlags(this.flags);
 
         try {
             if (typeof this.path !== 'string') throw new Error("Path must be string");

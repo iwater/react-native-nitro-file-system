@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-file-system",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "High-performance Node.js-compatible file system (fs) for React Native, powered by Nitro (JSI/C++) for zero-copy binary data handling and near-native speeds.",
   "repository": {
     "type": "git",

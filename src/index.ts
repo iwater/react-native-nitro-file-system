@@ -235,7 +235,7 @@ export class BigIntStats {
 }
 
 // --- Helper Functions ---
-function getFlags(flag: string | number | undefined): number {
+export function getFlags(flag: string | number | undefined): number {
     if (typeof flag === 'number') return flag;
     if (flag === undefined) return constants.O_RDONLY;
     // Basic mapping for common flags
@@ -1434,6 +1434,22 @@ export const promises = {
             open(path, flags, mode, (err, fd) => {
                 if (err) reject(err);
                 else resolve(fd!);
+            });
+        });
+    },
+    read: async (fd: number, buffer: Buffer | Uint8Array, offset: number, length: number, position: number | null): Promise<number> => {
+        return new Promise((resolve, reject) => {
+            read(fd, buffer, offset, length, position, (err, bytesRead) => {
+                if (err) reject(err);
+                else resolve(bytesRead!);
+            });
+        });
+    },
+    close: async (fd: number): Promise<void> => {
+        return new Promise((resolve, reject) => {
+            close(fd, (err) => {
+                if (err) reject(err);
+                else resolve();
             });
         });
     },

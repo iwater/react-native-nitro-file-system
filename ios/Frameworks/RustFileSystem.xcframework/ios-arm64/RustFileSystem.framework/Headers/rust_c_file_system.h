@@ -107,6 +107,8 @@ int rn_fs_open(const char *path, int flags, int _mode);
 
 int rn_fs_close(int fd);
 
+int rn_fs_import_fd(int fd);
+
 int rn_fs_read(int fd, uint8_t *buffer, size_t len, int position);
 
 int rn_fs_write(int fd, const uint8_t *buffer, size_t len, int position);

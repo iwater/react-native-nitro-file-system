@@ -21,6 +21,7 @@ public class NitroFileSystemPackage implements ReactPackage {
     @NonNull
     @Override
     public List<NativeModule> createNativeModules(@NonNull ReactApplicationContext reactContext) {
+        NitroFileSystemUtils.initialize(reactContext);
         return Collections.emptyList();
     }
 

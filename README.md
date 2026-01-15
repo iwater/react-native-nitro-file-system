@@ -66,6 +66,27 @@ fs.readFile('/path/to/file.txt', 'utf8', (err, data) => {
 const content = await fs.promises.readFile('/path/to/file.txt', 'utf8');
 ```
 
+
+### Android Content URIs
+
+The library supports Android `content://` URIs for the following operations:
+- **Read/Write**: `fs.open`, `fs.read`, `fs.write`, `fs.readFile`, `fs.writeFile`.
+- **Metadata**: `fs.stat`, `fs.lstat`, `fs.access` (existence check).
+- **Cleanup**: `fs.unlink`, `fs.rm`.
+- **Utility**: `fs.copyFile`.
+
+**Note**: Directory operations (`mkdir`, `readdir`, `rename`, `chmod`) are **not supported** for `content://` URIs as they are virtual resources.
+
+```typescript
+// Read directly from a content:// URI
+const contentUri = 'content://com.android.providers.media.documents/document/image%3A1234';
+const data = fs.readFileSync(contentUri, 'base64');
+
+// Get file stats
+const stats = fs.statSync(contentUri);
+console.log(stats.size);
+```
+
 ## License
 
 ISC

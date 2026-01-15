@@ -61,6 +61,27 @@ fs.readFile('/path/to/file.txt', 'utf8', (err, data) => {
 const content = await fs.promises.readFile('/path/to/file.txt', 'utf8');
 ```
 
+
+### Android Content URI 支持
+
+本库支持对 Android `content://` URI 进行以下操作：
+- **读写**: `fs.open`, `fs.read`, `fs.write`, `fs.readFile`, `fs.writeFile`。
+- **元数据**: `fs.stat`, `fs.lstat`, `fs.access` (检查是否存在)。
+- **清理**: `fs.unlink`, `fs.rm`。
+- **实用工具**: `fs.copyFile`。
+
+**注意**: 目录类操作 (`mkdir`, `readdir`, `rename`, `chmod`) **不支持** `content://` URI，因为它们代表虚拟资源而非物理文件系统路径。
+
+```typescript
+// 直接读取 content:// URI
+const contentUri = 'content://com.android.providers.media.documents/document/image%3A1234';
+const data = fs.readFileSync(contentUri, 'base64');
+
+// 获取文件信息
+const stats = fs.statSync(contentUri);
+console.log(stats.size);
+```
+
 ## 许可证
 
 ISC
