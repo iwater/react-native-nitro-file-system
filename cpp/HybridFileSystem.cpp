@@ -13,6 +13,9 @@ namespace margelo::nitro::node_fs {
 JNIEnv *getJNIEnv();
 }
 #endif
+#ifdef __APPLE__
+#include "../ios/NitroFileSystemUtils.h"
+#endif
 
 namespace margelo::nitro::node_fs {
 
@@ -74,6 +77,17 @@ double HybridFileSystem::open(const std::string &path, double flags,
     throw std::runtime_error("Failed to open content URI: " + path);
   }
 #endif
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
+    int fd = ::nitro::fs::openBookmark(path, static_cast<int>(flags),
+                                       static_cast<int>(mode));
+    if (fd >= 0) {
+      rn_fs_import_fd(fd);
+      return static_cast<double>(fd);
+    }
+    throw std::runtime_error("Failed to open bookmark URI: " + path);
+  }
+#endif
   return rn_fs_open(path.c_str(), static_cast<int>(flags),
                     static_cast<int>(mode));
 }
@@ -128,6 +142,14 @@ void HybridFileSystem::access(const std::string &path, double mode) {
         if (exists)
           return;
       }
+    }
+    throw std::runtime_error("access failed: " + path);
+  }
+#endif
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
+    if (::nitro::fs::accessBookmark(path, static_cast<int>(mode)) == 0) {
+      return;
     }
     throw std::runtime_error("access failed: " + path);
   }
@@ -245,6 +267,12 @@ std::string HybridFileSystem::realpath(const std::string &path) {
     return path;
   }
 #endif
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
+    std::string resolved = ::nitro::fs::resolveBookmarkPath(path);
+    return resolved.empty() ? path : resolved;
+  }
+#endif
   char *res = rn_fs_realpath(path.c_str());
   if (res == nullptr) {
     throw std::runtime_error("realpath failed: " + path);
@@ -267,6 +295,12 @@ std::string HybridFileSystem::mkdtemp(const std::string &prefix) {
 void HybridFileSystem::rm(const std::string &path, bool recursive) {
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
+    this->unlink(path);
+    return;
+  }
+#endif
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
     this->unlink(path);
     return;
   }
@@ -316,6 +350,15 @@ Stats HybridFileSystem::stat(const std::string &path) {
     throw std::runtime_error("Failed to stat content URI: " + path);
   }
 #endif
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
+    RNStats s = {0};
+    if (::nitro::fs::statBookmark(path, &s) == 0) {
+      return toStats(s);
+    }
+    throw std::runtime_error("Failed to stat bookmark URI: " + path);
+  }
+#endif
   RNStats s;
   if (rn_fs_stat(path.c_str(), &s) == 0) {
     return toStats(s);
@@ -328,6 +371,12 @@ Stats HybridFileSystem::lstat(const std::string &path) {
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
     // For content URIs, lstat is equivalent to stat
+    return stat(path);
+  }
+#endif
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
+    // For bookmarks, lstat is equivalent to stat (resolves automatically)
     return stat(path);
   }
 #endif
@@ -397,6 +446,14 @@ void HybridFileSystem::unlink(const std::string &path) {
     throw std::runtime_error("unlink failed: " + path);
   }
 #endif
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
+    if (::nitro::fs::unlinkBookmark(path) == 0) {
+      return;
+    }
+    throw std::runtime_error("unlink failed: " + path);
+  }
+#endif
   if (rn_fs_unlink(path.c_str()) != 0) {
     throw std::runtime_error("unlink failed: " + path);
   }
@@ -438,6 +495,14 @@ void HybridFileSystem::copyFile(const std::string &src, const std::string &dest,
       throw std::runtime_error("copyFile (content://) failed via JNI helper");
     }
     return;
+  }
+#endif
+#ifdef __APPLE__
+  if (src.find("bookmark://") == 0 || dest.find("bookmark://") == 0) {
+    if (::nitro::fs::copyBookmark(src, dest) == 0) {
+      return;
+    }
+    throw std::runtime_error("copyFile (bookmark://) failed");
   }
 #endif
   if (rn_fs_copy_file(src.c_str(), dest.c_str(), static_cast<int>(flags)) !=
@@ -496,6 +561,35 @@ HybridFileSystem::readFile(const std::string &path) {
     return buffer;
   }
 #endif
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
+    auto fd = this->open(path, O_RDONLY, 0);
+    RNStats stats;
+    if (rn_fs_fstat(static_cast<int>(fd), &stats) != 0) {
+      this->close(fd);
+      throw std::runtime_error("readFile(bookmark://) fstat failed");
+    }
+    size_t len = static_cast<size_t>(stats.size);
+    uint8_t *rawData = new uint8_t[len];
+    size_t totalRead = 0;
+    while (totalRead < len) {
+      int r = rn_fs_read(static_cast<int>(fd), rawData + totalRead,
+                         len - totalRead, -1);
+      if (r < 0) {
+        delete[] rawData;
+        this->close(fd);
+        throw std::runtime_error("readFile(bookmark://) read failed");
+      }
+      if (r == 0)
+        break;
+      totalRead += r;
+    }
+    this->close(fd);
+    auto buffer = ArrayBuffer::copy(rawData, totalRead);
+    delete[] rawData;
+    return buffer;
+  }
+#endif
 
   size_t len = 0;
   uint8_t *data = rn_fs_read_file(path.c_str(), &len);
@@ -529,9 +623,35 @@ void HybridFileSystem::writeFile(const std::string &path,
     return;
   }
 #endif
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
+    auto fd = this->open(path, O_WRONLY | O_CREAT | O_TRUNC, 0);
+    int r =
+        rn_fs_write(static_cast<int>(fd), buffer->data(), buffer->size(), -1);
+    this->close(fd);
+    if (r < 0) {
+      throw std::runtime_error("writeFile(bookmark://) failed");
+    }
+    return;
+  }
+#endif
   if (rn_fs_write_file(path.c_str(), buffer->data(), buffer->size()) != 0) {
     throw std::runtime_error("writeFile failed: " + path);
   }
+}
+
+std::string HybridFileSystem::getBookmark(const std::string &path) {
+#ifdef __APPLE__
+  return ::nitro::fs::getBookmark(path);
+#endif
+  throw std::runtime_error("getBookmark is only supported on iOS");
+}
+
+std::string HybridFileSystem::resolveBookmark(const std::string &bookmark) {
+#ifdef __APPLE__
+  return ::nitro::fs::resolveBookmark(bookmark);
+#endif
+  throw std::runtime_error("resolveBookmark is only supported on iOS");
 }
 
 std::string HybridFileSystem::getTempPath() {

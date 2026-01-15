@@ -83,6 +83,8 @@ public:
                 const std::vector<std::shared_ptr<ArrayBuffer>> &buffers,
                 double position) override;
 
+  std::string getBookmark(const std::string &path) override;
+  std::string resolveBookmark(const std::string &bookmark) override;
   std::string getTempPath() override;
 };
 

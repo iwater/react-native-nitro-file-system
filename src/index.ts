@@ -1427,6 +1427,27 @@ export function watch(
     return watcher;
 }
 
+/**
+ * Creates a bookmark:// URI (base64 encoded bookmark data) from a physical path.
+ */
+export function getBookmark(path: string): string {
+    return NitroFileSystem.getBookmark(path);
+}
+
+/**
+ * Resolves a bookmark:// URI back to its original physical path.
+ */
+export function resolveBookmark(bookmark: string): string {
+    return NitroFileSystem.resolveBookmark(bookmark);
+}
+
+/**
+ * Returns the temporary directory path.
+ */
+export function getTempPath(): string {
+    return NitroFileSystem.getTempPath();
+}
+
 // --- Promises API ---
 export const promises = {
     open: async (path: string, flags: string | number = 'r', mode: number = 0o666): Promise<number> => {
@@ -1460,6 +1481,12 @@ export const promises = {
                 else resolve(data!);
             });
         });
+    },
+    getBookmark: async (path: string): Promise<string> => {
+        return NitroFileSystem.getBookmark(path);
+    },
+    resolveBookmark: async (bookmark: string): Promise<string> => {
+        return NitroFileSystem.resolveBookmark(bookmark);
     },
     writeFile: async (path: string, data: string | Buffer | Uint8Array, options?: { encoding?: string; mode?: number; flag?: string } | string): Promise<void> => {
         return new Promise((resolve, reject) => {
@@ -2015,5 +2042,7 @@ export default {
     FSWatcher,
     // Promisified
     promises,
-    getTempPath: () => NitroFileSystem.getTempPath(),
+    getBookmark,
+    resolveBookmark,
+    getTempPath,
 };

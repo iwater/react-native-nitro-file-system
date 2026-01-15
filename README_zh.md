@@ -82,6 +82,25 @@ const stats = fs.statSync(contentUri);
 console.log(stats.size);
 ```
 
+### iOS 书签 (Bookmark) 支持
+
+内置对 iOS `bookmark://` URI 的原生支持，允许持久化访问安全范围内的资源（如通过文档选择器选择的 iCloud Drive 文件），无需进行文件拷贝。
+
+```typescript
+import fs, { getBookmark, resolveBookmark } from 'react-native-nitro-file-system';
+
+// 1. 将物理路径转换为书签
+const bookmark = getBookmark('/path/to/file');
+
+// 2. 使用书签 URI 直接访问
+const stat = await fs.promises.stat(bookmark);
+const content = await fs.promises.readFile(bookmark);
+
+// 3. 将书签解析回物理路径
+const path = resolveBookmark(bookmark);
+console.log(path); // "/path/to/file"
+```
+
 ## 许可证
 
 ISC

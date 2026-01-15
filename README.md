@@ -87,6 +87,25 @@ const stats = fs.statSync(contentUri);
 console.log(stats.size);
 ```
 
+### iOS Bookmark URI Support
+
+Includes first-class support for iOS `bookmark://` URIs, allowing persistent access to security-scoped resources (like iCloud Drive files picked via Document Picker) without copying them.
+
+```typescript
+import fs, { getBookmark, resolveBookmark } from 'react-native-nitro-file-system';
+
+// 1. Convert specific path to bookmark
+const bookmark = getBookmark('/path/to/file');
+
+// 2. Access using bookmark URI
+const stat = await fs.promises.stat(bookmark);
+const content = await fs.promises.readFile(bookmark);
+
+// 3. Resolve bookmark back to physical path
+const path = resolveBookmark(bookmark);
+console.log(path); // "/path/to/file"
+```
+
 ## License
 
 ISC

@@ -74,6 +74,8 @@ export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c
     readFile(path: string): ArrayBuffer;
     writeFile(path: string, buffer: ArrayBuffer): void;
 
+    getBookmark(path: string): string;
+    resolveBookmark(bookmark: string): string;
     getTempPath(): string;
 
     // Vector I/O (Phase 7)
