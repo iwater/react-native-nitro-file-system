@@ -156,12 +156,17 @@ std::string getBookmark(const std::string &path) {
     if (!url)
       return "";
 
+    BOOL isSecurityScoped = [url startAccessingSecurityScopedResource];
+
     NSError *error = nil;
-    NSData *bookmarkData =
-        [url bookmarkDataWithOptions:NSURLBookmarkCreationMinimalBookmark
-            includingResourceValuesForKeys:nil
-                             relativeToURL:nil
-                                     error:&error];
+    NSData *bookmarkData = [url bookmarkDataWithOptions:0
+                         includingResourceValuesForKeys:nil
+                                          relativeToURL:nil
+                                                  error:&error];
+
+    if (isSecurityScoped) {
+      [url stopAccessingSecurityScopedResource];
+    }
 
     if (error || !bookmarkData) {
       NSLog(@"[NitroFS] getBookmark error: %@", error.localizedDescription);
