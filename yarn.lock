@@ -2877,14 +2877,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-native-nitro-buffer@npm:~0.0.14":
-  version: 0.0.14
-  resolution: "react-native-nitro-buffer@npm:0.0.14"
+"react-native-nitro-buffer@npm:>=0.0.14":
+  version: 0.0.15
+  resolution: "react-native-nitro-buffer@npm:0.0.15"
   peerDependencies:
     react: "*"
     react-native: "*"
     react-native-nitro-modules: ^0.32.0
-  checksum: 10c0/20e4177cfe7317bf473a1907a06278ff79a60de4d289ed69480679f33b84d293e9601085cd3ccd02139fa14ef7154a48b4b43bc8444d1882ee6dfa1b35f8431d
+  checksum: 10c0/e6a1aae226446b9ff7074e89b5b9b0379fa5eb06fccdab6152c121845bfd1e9cda788fff6d22b6f0ada1ff1041ad2b0ec69746ae7ec0a1c0f7a9ad7d8f053546
   languageName: node
   linkType: hard
 
@@ -2896,25 +2896,25 @@ __metadata:
     "@types/react": "npm:*"
     "@types/readable-stream": "npm:^4.0.23"
     jest: "npm:^29.0.0"
-    react-native-nitro-buffer: "npm:~0.0.14"
-    react-native-nitro-modules: "npm:^0.32.0"
+    react-native-nitro-buffer: "npm:>=0.0.14"
+    react-native-nitro-modules: "npm:0.35.0"
     readable-stream: "npm:^4.7.0"
     ts-jest: "npm:^29.0.0"
     typescript: "npm:^5.0.0"
   peerDependencies:
     react: "*"
     react-native: "*"
-    react-native-nitro-modules: ^0.32.0
+    react-native-nitro-modules: 0.35.0
   languageName: unknown
   linkType: soft
 
-"react-native-nitro-modules@npm:^0.32.0":
-  version: 0.32.0
-  resolution: "react-native-nitro-modules@npm:0.32.0"
+"react-native-nitro-modules@npm:0.35.0":
+  version: 0.35.0
+  resolution: "react-native-nitro-modules@npm:0.35.0"
   peerDependencies:
     react: "*"
     react-native: "*"
-  checksum: 10c0/4074d93391a5691175d9df335549c3719e2c549e9639d1c092a591c22196e596a1654a77496e9b6c56708605d6074d3a25199ace091db1682d69fbc0d100af04
+  checksum: 10c0/3e1360081b0b9b6fc315f062a65d48dc5398ca03effdf8869c00dce808ddd320a3fe1869077784c86c3b9dd3d500cb6fd84e0d0b07a73ecbe1598fb800a4b0bb
   languageName: node
   linkType: hard
 
