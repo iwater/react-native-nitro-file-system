@@ -106,7 +106,7 @@ double HybridFileSystem::read(double fd,
 
   uint8_t *data = buffer->data() + static_cast<size_t>(offset);
   return rn_fs_read(static_cast<int>(fd), data, static_cast<size_t>(length),
-                    static_cast<int>(position));
+                    static_cast<int64_t>(position));
 }
 
 double HybridFileSystem::write(double fd,
@@ -122,7 +122,7 @@ double HybridFileSystem::write(double fd,
   uint8_t *data = buffer->data() + static_cast<size_t>(offset);
 
   return rn_fs_write(static_cast<int>(fd), data, static_cast<size_t>(length),
-                     static_cast<int>(position));
+                     static_cast<int64_t>(position));
 }
 
 void HybridFileSystem::access(const std::string &path, double mode) {
@@ -538,7 +538,7 @@ HybridFileSystem::readFile(const std::string &path) {
     // read but loop is safer.
     size_t totalRead = 0;
     while (totalRead < len) {
-      int r = rn_fs_read(static_cast<int>(fd), rawData + totalRead,
+      int64_t r = rn_fs_read(static_cast<int>(fd), rawData + totalRead,
                          len - totalRead, -1); // -1 for current pos
       if (r < 0) {
         delete[] rawData;
@@ -573,7 +573,7 @@ HybridFileSystem::readFile(const std::string &path) {
     uint8_t *rawData = new uint8_t[len];
     size_t totalRead = 0;
     while (totalRead < len) {
-      int r = rn_fs_read(static_cast<int>(fd), rawData + totalRead,
+      int64_t r = rn_fs_read(static_cast<int>(fd), rawData + totalRead,
                          len - totalRead, -1);
       if (r < 0) {
         delete[] rawData;
@@ -612,7 +612,7 @@ void HybridFileSystem::writeFile(const std::string &path,
     // 1. Open (write mode)
     double fd = this->open(path, O_WRONLY | O_CREAT | O_TRUNC, 0);
     // 2. Write
-    int r =
+    int64_t r =
         rn_fs_write(static_cast<int>(fd), buffer->data(), buffer->size(), -1);
     // 3. Close
     this->close(fd);
@@ -626,7 +626,7 @@ void HybridFileSystem::writeFile(const std::string &path,
 #ifdef __APPLE__
   if (path.find("bookmark://") == 0) {
     auto fd = this->open(path, O_WRONLY | O_CREAT | O_TRUNC, 0);
-    int r =
+    int64_t r =
         rn_fs_write(static_cast<int>(fd), buffer->data(), buffer->size(), -1);
     this->close(fd);
     if (r < 0) {

@@ -109,9 +109,9 @@ int rn_fs_close(int fd);
 
 int rn_fs_import_fd(int fd);
 
-int rn_fs_read(int fd, uint8_t *buffer, size_t len, int position);
+int64_t rn_fs_read(int fd, uint8_t *buffer, size_t len, int64_t position);
 
-int rn_fs_write(int fd, const uint8_t *buffer, size_t len, int position);
+int64_t rn_fs_write(int fd, const uint8_t *buffer, size_t len, int64_t position);
 
 char *rn_fs_get_temp_dir(void);
 
