@@ -86,6 +86,9 @@ public:
   std::string getBookmark(const std::string &path) override;
   std::string resolveBookmark(const std::string &bookmark) override;
   std::string getTempPath() override;
+
+private:
+  std::string normalizePath(const std::string &path);
 };
 
 } // namespace margelo::nitro::node_fs

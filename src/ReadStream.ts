@@ -1,7 +1,8 @@
 import { Readable, ReadableOptions } from 'readable-stream';
 import { NitroFileSystem } from './native';
 import { Buffer } from 'react-native-nitro-buffer';
-import { getFlags } from './index';
+import { getFlags, PathLike, normalizePath } from './index';
+
 
 export interface ReadStreamOptions extends ReadableOptions {
     flags?: string;
@@ -16,7 +17,8 @@ export interface ReadStreamOptions extends ReadableOptions {
 }
 
 export class ReadStream extends Readable {
-    path: string | Buffer;
+    path: PathLike | Buffer;
+
     fd: number | null;
     flags: string = 'r';
     mode: number = 0o666;
@@ -28,7 +30,8 @@ export class ReadStream extends Readable {
     _fileClosed: boolean = false;
     pending: boolean = false;
 
-    constructor(path: string | Buffer, options?: ReadStreamOptions) {
+    constructor(path: PathLike | Buffer, options?: ReadStreamOptions) {
+
         // @ts-ignore
         super(options);
 
@@ -60,14 +63,13 @@ export class ReadStream extends Readable {
         const flagNum = getFlags(this.flags);
 
         try {
-            if (typeof this.path !== 'string') throw new Error("Path must be string");
-
             // To be safe and async-like, we use immediate
             setImmediate(() => {
                 try {
-                    const fd = NitroFileSystem.open(this.path as string, flagNum, this.mode);
+                    const normalizedPath = (this.path instanceof Buffer) ? this.path.toString() : normalizePath(this.path);
+                    const fd = NitroFileSystem.open(normalizedPath, flagNum, this.mode);
                     if (fd < 0) {
-                        this.emit('error', new Error(`ENOENT: no such file or directory, open '${this.path}'`));
+                        this.emit('error', new Error(`ENOENT: no such file or directory, open '${normalizedPath}'`));
                         this._fileClosed = true;
                         return;
                     }

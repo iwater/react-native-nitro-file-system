@@ -39,6 +39,8 @@ export const constants = {
 };
 
 // --- Types ---
+export type PathLike = string | URL;
+
 type Callback<T = void> = (err: Error | null, result?: T) => void;
 type ReadCallback = (err: Error | null, bytesRead?: number, buffer?: Buffer) => void;
 type WriteCallback = (err: Error | null, bytesWritten?: number, buffer?: Buffer) => void;
@@ -267,24 +269,47 @@ function toUnixTimestamp(time: string | number | Date): number {
     }
     return 0;
 }
+
+export function normalizePath(path: PathLike): string {
+    if (typeof path === 'object' && path instanceof URL) {
+        if (path.protocol !== 'file:') {
+            // Keep other protocols as is (e.g. content://, bookmark://) 
+            // although they aren't technically standard URL protocols in JS engine sometimes.
+            return path.toString();
+        }
+        return decodeURIComponent(path.pathname);
+    }
+    if (typeof path === 'string') {
+        if (path.startsWith('file://')) {
+            return decodeURIComponent(path.substring(7));
+        }
+        if (path.startsWith('file:/')) {
+            return decodeURIComponent(path.substring(5));
+        }
+    }
+    return path as string;
+}
+
 // --- Implementation ---
 
-export function openSync(path: string, flags: string | number = 'r', mode: number = 0o666): number {
+export function openSync(path: PathLike, flags: string | number = 'r', mode: number = 0o666): number {
     const flagsNum = getFlags(flags);
-    const fd = NitroFileSystem.open(path, flagsNum, mode);
+    const normalizedPath = normalizePath(path);
+    const fd = NitroFileSystem.open(normalizedPath, flagsNum, mode);
     if (fd < 0) {
-        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+        throw new Error(`ENOENT: no such file or directory, open '${normalizedPath}'`);
     }
     return fd;
 }
 
-export function open(path: string, flags: string | number, mode?: number | Callback<number>, callback?: Callback<number>): void {
+export function open(path: PathLike, flags: string | number, mode?: number | Callback<number>, callback?: Callback<number>): void {
     if (typeof mode === 'function') {
         callback = mode;
         mode = 0o666;
     }
     const modeNum = mode as number || 0o666;
     const flagsNum = getFlags(flags);
+    const normalizedPath = normalizePath(path);
 
     // Asynchronous implementation using setTimeout generally
     // But here we rely on the bridge. 
@@ -296,9 +321,9 @@ export function open(path: string, flags: string | number, mode?: number | Callb
     // Basic stub for async
     setImmediate(() => {
         try {
-            const fd = NitroFileSystem.open(path, flagsNum, modeNum);
+            const fd = NitroFileSystem.open(normalizedPath, flagsNum, modeNum);
             if (fd < 0) {
-                callback?.(new Error(`ENOENT: no such file or directory, open '${path}'`));
+                callback?.(new Error(`ENOENT: no such file or directory, open '${normalizedPath}'`));
             } else {
                 callback?.(null, fd);
             }
@@ -307,6 +332,7 @@ export function open(path: string, flags: string | number, mode?: number | Callb
         }
     });
 }
+
 
 export function closeSync(fd: number): void {
     NitroFileSystem.close(fd);
@@ -552,21 +578,22 @@ export function write(
 }
 
 // Stat with options
-export function statSync(path: string, options?: StatOptions): Stats | BigIntStats {
+export function statSync(path: PathLike, options?: StatOptions): Stats | BigIntStats {
+    const normalizedPath = normalizePath(path);
     try {
-        const stats = NitroFileSystem.stat(path);
+        const stats = NitroFileSystem.stat(normalizedPath);
         if (options?.bigint) {
             return new BigIntStats(stats);
         }
         return new Stats(stats);
     } catch (e) {
-        throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
+        throw new Error(`ENOENT: no such file or directory, stat '${normalizedPath}'`);
     }
 }
 
-export function stat(path: string, callback: StatsCallback): void;
-export function stat(path: string, options: StatOptions, callback: StatsCallback): void;
-export function stat(path: string, optionsOrCallback: StatOptions | StatsCallback, callback?: StatsCallback): void {
+export function stat(path: PathLike, callback: StatsCallback): void;
+export function stat(path: PathLike, options: StatOptions, callback: StatsCallback): void;
+export function stat(path: PathLike, optionsOrCallback: StatOptions | StatsCallback, callback?: StatsCallback): void {
     let options: StatOptions | undefined;
     let cb: StatsCallback;
 
@@ -577,9 +604,10 @@ export function stat(path: string, optionsOrCallback: StatOptions | StatsCallbac
         cb = callback!;
     }
 
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            const res = statSync(path, options);
+            const res = statSync(normalizedPath, options);
             cb(null, res);
         } catch (e: any) {
             cb(e);
@@ -587,21 +615,23 @@ export function stat(path: string, optionsOrCallback: StatOptions | StatsCallbac
     });
 }
 
-export function lstatSync(path: string, options?: StatOptions): Stats | BigIntStats {
+
+export function lstatSync(path: PathLike, options?: StatOptions): Stats | BigIntStats {
+    const normalizedPath = normalizePath(path);
     try {
-        const stats = NitroFileSystem.lstat(path);
+        const stats = NitroFileSystem.lstat(normalizedPath);
         if (options?.bigint) {
             return new BigIntStats(stats);
         }
         return new Stats(stats);
     } catch (e) {
-        throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
+        throw new Error(`ENOENT: no such file or directory, lstat '${normalizedPath}'`);
     }
 }
 
-export function lstat(path: string, callback: StatsCallback): void;
-export function lstat(path: string, options: StatOptions, callback: StatsCallback): void;
-export function lstat(path: string, optionsOrCallback: StatOptions | StatsCallback, callback?: StatsCallback): void {
+export function lstat(path: PathLike, callback: StatsCallback): void;
+export function lstat(path: PathLike, options: StatOptions, callback: StatsCallback): void;
+export function lstat(path: PathLike, optionsOrCallback: StatOptions | StatsCallback, callback?: StatsCallback): void {
     let options: StatOptions | undefined;
     let cb: StatsCallback;
 
@@ -612,15 +642,17 @@ export function lstat(path: string, optionsOrCallback: StatOptions | StatsCallba
         cb = callback!;
     }
 
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            const res = lstatSync(path, options);
+            const res = lstatSync(normalizedPath, options);
             cb(null, res);
         } catch (e: any) {
             cb(e);
         }
     });
 }
+
 
 export function fstatSync(fd: number, options?: StatOptions): Stats | BigIntStats {
     try {
@@ -657,7 +689,7 @@ export function fstat(fd: number, optionsOrCallback: StatOptions | StatsCallback
     });
 }
 
-export function mkdirSync(path: string, options?: { recursive?: boolean; mode?: number } | number): string | undefined {
+export function mkdirSync(path: PathLike, options?: { recursive?: boolean; mode?: number } | number): string | undefined {
     let mode = 0o777;
     let recursive = false;
 
@@ -668,11 +700,12 @@ export function mkdirSync(path: string, options?: { recursive?: boolean; mode?: 
         recursive = options.recursive || false;
     }
 
-    NitroFileSystem.mkdir(path, mode, recursive);
+    const normalizedPath = normalizePath(path);
+    NitroFileSystem.mkdir(normalizedPath, mode, recursive);
     return undefined; // Node returns string if created first dir in recursive, here simplified
 }
 
-export function mkdir(path: string, options?: { recursive?: boolean; mode?: number } | number | Callback, callback?: Callback): void {
+export function mkdir(path: PathLike, options?: { recursive?: boolean; mode?: number } | number | Callback, callback?: Callback): void {
     if (typeof options === 'function') {
         callback = options;
         options = undefined;
@@ -688,9 +721,10 @@ export function mkdir(path: string, options?: { recursive?: boolean; mode?: numb
         recursive = options.recursive || false;
     }
 
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            mkdirSync(path, { mode, recursive });
+            mkdirSync(normalizedPath, { mode, recursive });
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -698,18 +732,19 @@ export function mkdir(path: string, options?: { recursive?: boolean; mode?: numb
     });
 }
 
-export function rmdirSync(path: string, options?: RmdirOptions): void {
+export function rmdirSync(path: PathLike, options?: RmdirOptions): void {
+    const normalizedPath = normalizePath(path);
     if (options?.recursive) {
         // Use rm for recursive deletion
-        NitroFileSystem.rm(path, true);
+        NitroFileSystem.rm(normalizedPath, true);
     } else {
-        NitroFileSystem.rmdir(path);
+        NitroFileSystem.rmdir(normalizedPath);
     }
 }
 
-export function rmdir(path: string, callback?: Callback): void;
-export function rmdir(path: string, options: RmdirOptions, callback?: Callback): void;
-export function rmdir(path: string, optionsOrCallback?: RmdirOptions | Callback, callback?: Callback): void {
+export function rmdir(path: PathLike, callback?: Callback): void;
+export function rmdir(path: PathLike, options: RmdirOptions, callback?: Callback): void;
+export function rmdir(path: PathLike, optionsOrCallback?: RmdirOptions | Callback, callback?: Callback): void {
     let options: RmdirOptions | undefined;
     let cb: Callback | undefined;
 
@@ -720,9 +755,10 @@ export function rmdir(path: string, optionsOrCallback?: RmdirOptions | Callback,
         cb = callback;
     }
 
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            rmdirSync(path, options);
+            rmdirSync(normalizedPath, options);
             cb?.(null);
         } catch (e: any) {
             cb?.(e);
@@ -732,14 +768,17 @@ export function rmdir(path: string, optionsOrCallback?: RmdirOptions | Callback,
 
 
 
-export function unlinkSync(path: string): void {
-    NitroFileSystem.unlink(path);
+
+export function unlinkSync(path: PathLike): void {
+    const normalizedPath = normalizePath(path);
+    NitroFileSystem.unlink(normalizedPath);
 }
 
-export function unlink(path: string, callback?: Callback): void {
+export function unlink(path: PathLike, callback?: Callback): void {
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            unlinkSync(path);
+            unlinkSync(normalizedPath);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -747,14 +786,19 @@ export function unlink(path: string, callback?: Callback): void {
     });
 }
 
-export function renameSync(oldPath: string, newPath: string): void {
-    NitroFileSystem.rename(oldPath, newPath);
+
+export function renameSync(oldPath: PathLike, newPath: PathLike): void {
+    const normalizedOldPath = normalizePath(oldPath);
+    const normalizedNewPath = normalizePath(newPath);
+    NitroFileSystem.rename(normalizedOldPath, normalizedNewPath);
 }
 
-export function rename(oldPath: string, newPath: string, callback?: Callback): void {
+export function rename(oldPath: PathLike, newPath: PathLike, callback?: Callback): void {
+    const normalizedOldPath = normalizePath(oldPath);
+    const normalizedNewPath = normalizePath(newPath);
     setImmediate(() => {
         try {
-            renameSync(oldPath, newPath);
+            renameSync(normalizedOldPath, normalizedNewPath);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -762,19 +806,24 @@ export function rename(oldPath: string, newPath: string, callback?: Callback): v
     });
 }
 
-export function copyFileSync(src: string, dest: string, flags: number = 0): void {
-    NitroFileSystem.copyFile(src, dest, flags);
+
+export function copyFileSync(src: PathLike, dest: PathLike, flags: number = 0): void {
+    const normalizedSrc = normalizePath(src);
+    const normalizedDest = normalizePath(dest);
+    NitroFileSystem.copyFile(normalizedSrc, normalizedDest, flags);
 }
 
-export function copyFile(src: string, dest: string, flags: number | Callback, callback?: Callback): void {
+export function copyFile(src: PathLike, dest: PathLike, flags: number | Callback, callback?: Callback): void {
     if (typeof flags === 'function') {
         callback = flags;
         flags = 0;
     }
     const f = flags as number || 0;
+    const normalizedSrc = normalizePath(src);
+    const normalizedDest = normalizePath(dest);
     setImmediate(() => {
         try {
-            copyFileSync(src, dest, f);
+            copyFileSync(normalizedSrc, normalizedDest, f);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -784,19 +833,21 @@ export function copyFile(src: string, dest: string, flags: number | Callback, ca
 
 // --- Phase 1: Basic Operations ---
 
-export function accessSync(path: string, mode: number = constants.F_OK): void {
-    NitroFileSystem.access(path, mode);
+export function accessSync(path: PathLike, mode: number = constants.F_OK): void {
+    const normalizedPath = normalizePath(path);
+    NitroFileSystem.access(normalizedPath, mode);
 }
 
-export function access(path: string, mode: number | Callback, callback?: Callback): void {
+export function access(path: PathLike, mode: number | Callback, callback?: Callback): void {
     if (typeof mode === 'function') {
         callback = mode;
         mode = constants.F_OK;
     }
     const m = mode as number || constants.F_OK;
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            accessSync(path, m);
+            accessSync(normalizedPath, m);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -804,19 +855,22 @@ export function access(path: string, mode: number | Callback, callback?: Callbac
     });
 }
 
-export function truncateSync(path: string, len: number = 0): void {
-    NitroFileSystem.truncate(path, len);
+
+export function truncateSync(path: PathLike, len: number = 0): void {
+    const normalizedPath = normalizePath(path);
+    NitroFileSystem.truncate(normalizedPath, len);
 }
 
-export function truncate(path: string, len: number | Callback, callback?: Callback): void {
+export function truncate(path: PathLike, len: number | Callback, callback?: Callback): void {
     if (typeof len === 'function') {
         callback = len;
         len = 0;
     }
     const l = len as number || 0;
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            truncateSync(path, l);
+            truncateSync(normalizedPath, l);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -861,14 +915,16 @@ export function fsync(fd: number, callback: Callback): void {
 
 // --- Phase 2: Permissions & Timestamps ---
 
-export function chmodSync(path: string, mode: number): void {
-    NitroFileSystem.chmod(path, mode);
+export function chmodSync(path: PathLike, mode: number): void {
+    const normalizedPath = normalizePath(path);
+    NitroFileSystem.chmod(normalizedPath, mode);
 }
 
-export function chmod(path: string, mode: number, callback?: Callback): void {
+export function chmod(path: PathLike, mode: number, callback?: Callback): void {
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            chmodSync(path, mode);
+            chmodSync(normalizedPath, mode);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -876,14 +932,17 @@ export function chmod(path: string, mode: number, callback?: Callback): void {
     });
 }
 
-export function lchmodSync(path: string, mode: number): void {
-    NitroFileSystem.lchmod(path, mode);
+
+export function lchmodSync(path: PathLike, mode: number): void {
+    const normalizedPath = normalizePath(path);
+    NitroFileSystem.lchmod(normalizedPath, mode);
 }
 
-export function lchmod(path: string, mode: number, callback?: Callback): void {
+export function lchmod(path: PathLike, mode: number, callback?: Callback): void {
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            lchmodSync(path, mode);
+            lchmodSync(normalizedPath, mode);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -906,14 +965,16 @@ export function fchmod(fd: number, mode: number, callback?: Callback): void {
     });
 }
 
-export function chownSync(path: string, uid: number, gid: number): void {
-    NitroFileSystem.chown(path, uid, gid);
+export function chownSync(path: PathLike, uid: number, gid: number): void {
+    const normalizedPath = normalizePath(path);
+    NitroFileSystem.chown(normalizedPath, uid, gid);
 }
 
-export function chown(path: string, uid: number, gid: number, callback?: Callback): void {
+export function chown(path: PathLike, uid: number, gid: number, callback?: Callback): void {
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            chownSync(path, uid, gid);
+            chownSync(normalizedPath, uid, gid);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -936,14 +997,16 @@ export function fchown(fd: number, uid: number, gid: number, callback?: Callback
     });
 }
 
-export function lchownSync(path: string, uid: number, gid: number): void {
-    NitroFileSystem.lchown(path, uid, gid);
+export function lchownSync(path: PathLike, uid: number, gid: number): void {
+    const normalizedPath = normalizePath(path);
+    NitroFileSystem.lchown(normalizedPath, uid, gid);
 }
 
-export function lchown(path: string, uid: number, gid: number, callback?: Callback): void {
+export function lchown(path: PathLike, uid: number, gid: number, callback?: Callback): void {
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            lchownSync(path, uid, gid);
+            lchownSync(normalizedPath, uid, gid);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -951,14 +1014,17 @@ export function lchown(path: string, uid: number, gid: number, callback?: Callba
     });
 }
 
-export function utimesSync(path: string, atime: string | number | Date, mtime: string | number | Date): void {
-    NitroFileSystem.utimes(path, toUnixTimestamp(atime), toUnixTimestamp(mtime));
+
+export function utimesSync(path: PathLike, atime: string | number | Date, mtime: string | number | Date): void {
+    const normalizedPath = normalizePath(path);
+    NitroFileSystem.utimes(normalizedPath, toUnixTimestamp(atime), toUnixTimestamp(mtime));
 }
 
-export function utimes(path: string, atime: string | number | Date, mtime: string | number | Date, callback?: Callback): void {
+export function utimes(path: PathLike, atime: string | number | Date, mtime: string | number | Date, callback?: Callback): void {
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            utimesSync(path, atime, mtime);
+            utimesSync(normalizedPath, atime, mtime);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -966,14 +1032,17 @@ export function utimes(path: string, atime: string | number | Date, mtime: strin
     });
 }
 
-export function lutimesSync(path: string, atime: string | number | Date, mtime: string | number | Date): void {
-    NitroFileSystem.lutimes(path, toUnixTimestamp(atime), toUnixTimestamp(mtime));
+
+export function lutimesSync(path: PathLike, atime: string | number | Date, mtime: string | number | Date): void {
+    const normalizedPath = normalizePath(path);
+    NitroFileSystem.lutimes(normalizedPath, toUnixTimestamp(atime), toUnixTimestamp(mtime));
 }
 
-export function lutimes(path: string, atime: string | number | Date, mtime: string | number | Date, callback?: Callback): void {
+export function lutimes(path: PathLike, atime: string | number | Date, mtime: string | number | Date, callback?: Callback): void {
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            lutimesSync(path, atime, mtime);
+            lutimesSync(normalizedPath, atime, mtime);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -998,14 +1067,18 @@ export function futimes(fd: number, atime: string | number | Date, mtime: string
 
 // --- Phase 3: Links ---
 
-export function linkSync(existingPath: string, newPath: string): void {
-    NitroFileSystem.link(existingPath, newPath);
+export function linkSync(existingPath: PathLike, newPath: PathLike): void {
+    const normalizedExistingPath = normalizePath(existingPath);
+    const normalizedNewPath = normalizePath(newPath);
+    NitroFileSystem.link(normalizedExistingPath, normalizedNewPath);
 }
 
-export function link(existingPath: string, newPath: string, callback?: Callback): void {
+export function link(existingPath: PathLike, newPath: PathLike, callback?: Callback): void {
+    const normalizedExistingPath = normalizePath(existingPath);
+    const normalizedNewPath = normalizePath(newPath);
     setImmediate(() => {
         try {
-            linkSync(existingPath, newPath);
+            linkSync(normalizedExistingPath, normalizedNewPath);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -1013,19 +1086,23 @@ export function link(existingPath: string, newPath: string, callback?: Callback)
     });
 }
 
-export function symlinkSync(target: string, path: string, type?: string): void {
+export function symlinkSync(target: PathLike, path: PathLike, type?: string): void {
+    const normalizedTarget = normalizePath(target);
+    const normalizedPath = normalizePath(path);
     // type argument is ignored on posix usually, and we only support posix for now
-    NitroFileSystem.symlink(target, path);
+    NitroFileSystem.symlink(normalizedTarget, normalizedPath);
 }
 
-export function symlink(target: string, path: string, type?: string | Callback, callback?: Callback): void {
+export function symlink(target: PathLike, path: PathLike, type?: string | Callback, callback?: Callback): void {
     if (typeof type === 'function') {
         callback = type;
         type = undefined;
     }
+    const normalizedTarget = normalizePath(target);
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            symlinkSync(target, path, type as string);
+            symlinkSync(normalizedTarget, normalizedPath, type as string);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -1033,18 +1110,21 @@ export function symlink(target: string, path: string, type?: string | Callback, 
     });
 }
 
-export function readlinkSync(path: string, options?: { encoding?: string } | string): string {
-    return NitroFileSystem.readlink(path);
+
+export function readlinkSync(path: PathLike, options?: { encoding?: string } | string): string {
+    const normalizedPath = normalizePath(path);
+    return NitroFileSystem.readlink(normalizedPath);
 }
 
-export function readlink(path: string, options?: { encoding?: string } | string | Callback<string>, callback?: Callback<string>): void {
+export function readlink(path: PathLike, options?: { encoding?: string } | string | Callback<string>, callback?: Callback<string>): void {
     if (typeof options === 'function') {
         callback = options;
         options = undefined;
     }
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            const res = readlinkSync(path, options as any);
+            const res = readlinkSync(normalizedPath, options as any);
             callback?.(null, res);
         } catch (e: any) {
             callback?.(e);
@@ -1052,18 +1132,21 @@ export function readlink(path: string, options?: { encoding?: string } | string 
     });
 }
 
-export function realpathSync(path: string, options?: { encoding?: string } | string): string {
-    return NitroFileSystem.realpath(path);
+
+export function realpathSync(path: PathLike, options?: { encoding?: string } | string): string {
+    const normalizedPath = normalizePath(path);
+    return NitroFileSystem.realpath(normalizedPath);
 }
 
-export function realpath(path: string, options?: { encoding?: string } | string | Callback<string>, callback?: Callback<string>): void {
+export function realpath(path: PathLike, options?: { encoding?: string } | string | Callback<string>, callback?: Callback<string>): void {
     if (typeof options === 'function') {
         callback = options;
         options = undefined;
     }
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            const res = realpathSync(path, options as any);
+            const res = realpathSync(normalizedPath, options as any);
             callback?.(null, res);
         } catch (e: any) {
             callback?.(e);
@@ -1093,19 +1176,22 @@ export function mkdtemp(prefix: string, options?: any | Callback<string>, callba
     });
 }
 
-export function rmSync(path: string, options?: RmOptions): void {
+
+export function rmSync(path: PathLike, options?: RmOptions): void {
+    const normalizedPath = normalizePath(path);
     const recursive = options?.recursive || false;
-    NitroFileSystem.rm(path, recursive);
+    NitroFileSystem.rm(normalizedPath, recursive);
 }
 
-export function rm(path: string, options?: RmOptions | Callback, callback?: Callback): void {
+export function rm(path: PathLike, options?: RmOptions | Callback, callback?: Callback): void {
     if (typeof options === 'function') {
         callback = options;
         options = undefined;
     }
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            rmSync(path, options as RmOptions);
+            rmSync(normalizedPath, options as RmOptions);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -1214,7 +1300,7 @@ export function fdatasync(fd: number, callback: Callback): void {
 }
 
 
-export function appendFileSync(file: string | number | Buffer, data: string | Buffer, options?: { encoding?: BufferEncoding; mode?: number; flag?: string } | BufferEncoding): void {
+export function appendFileSync(file: PathLike | number | Buffer, data: string | Buffer, options?: { encoding?: BufferEncoding; mode?: number; flag?: string } | BufferEncoding): void {
     let mode = 0o666;
     let flag = 'a';
 
@@ -1231,7 +1317,7 @@ export function appendFileSync(file: string | number | Buffer, data: string | Bu
         return;
     }
 
-    const path = typeof file === 'string' ? file : file.toString();
+    const path = (file instanceof Buffer) ? file.toString() : normalizePath(file);
     const fd = openSync(path, flag, mode);
     try {
         writeSync(fd, buf);
@@ -1240,7 +1326,8 @@ export function appendFileSync(file: string | number | Buffer, data: string | Bu
     }
 }
 
-export function appendFile(file: string | number | Buffer, data: string | Buffer, options?: { encoding?: BufferEncoding; mode?: number; flag?: string } | BufferEncoding | Callback, callback?: Callback): void {
+
+export function appendFile(file: PathLike | number | Buffer, data: string | Buffer, options?: { encoding?: BufferEncoding; mode?: number; flag?: string } | BufferEncoding | Callback, callback?: Callback): void {
     if (typeof options === 'function') {
         callback = options;
         options = undefined;
@@ -1263,7 +1350,7 @@ export function appendFile(file: string | number | Buffer, data: string | Buffer
         return;
     }
 
-    const path = typeof file === 'string' ? file : file.toString();
+    const path = (file instanceof Buffer) ? file.toString() : normalizePath(file);
 
     open(path, flag, mode, (err, fd) => {
         if (err) {
@@ -1283,12 +1370,13 @@ export function appendFile(file: string | number | Buffer, data: string | Buffer
 
 // --- High-level Operations ---
 
-export function readFile(path: string, options?: { encoding?: string; flag?: string } | string | Callback<Buffer | string>, callback?: Callback<Buffer | string>): void {
+export function readFile(path: PathLike, options?: { encoding?: string; flag?: string } | string | Callback<Buffer | string>, callback?: Callback<Buffer | string>): void {
     if (typeof options === 'function') {
         callback = options;
         options = undefined;
     }
 
+    const normalizedPath = normalizePath(path);
     // Parse options (encoding/flag) if needed
     let encoding: string | undefined;
     if (typeof options === 'string') {
@@ -1299,7 +1387,7 @@ export function readFile(path: string, options?: { encoding?: string; flag?: str
 
     setImmediate(() => {
         try {
-            const arrayBuffer = NitroFileSystem.readFile(path);
+            const arrayBuffer = NitroFileSystem.readFile(normalizedPath);
             const buffer = Buffer.from(arrayBuffer);
             if (encoding) {
                 callback?.(null, buffer.toString(encoding as BufferEncoding));
@@ -1312,7 +1400,8 @@ export function readFile(path: string, options?: { encoding?: string; flag?: str
     });
 }
 
-export function readFileSync(path: string, options?: { encoding?: string; flag?: string } | string): Buffer | string {
+export function readFileSync(path: PathLike, options?: { encoding?: string; flag?: string } | string): Buffer | string {
+    const normalizedPath = normalizePath(path);
     let encoding: string | undefined;
     if (typeof options === 'string') {
         encoding = options;
@@ -1320,7 +1409,7 @@ export function readFileSync(path: string, options?: { encoding?: string; flag?:
         encoding = options?.encoding;
     }
 
-    const arrayBuffer = NitroFileSystem.readFile(path);
+    const arrayBuffer = NitroFileSystem.readFile(normalizedPath);
     const buffer = Buffer.from(arrayBuffer);
 
     if (encoding) {
@@ -1330,18 +1419,20 @@ export function readFileSync(path: string, options?: { encoding?: string; flag?:
 }
 
 
-export function writeFile(path: string, data: string | Buffer | Uint8Array, options?: { encoding?: string; mode?: number; flag?: string } | string | Callback, callback?: Callback): void {
+
+export function writeFile(path: PathLike, data: string | Buffer | Uint8Array, options?: { encoding?: string; mode?: number; flag?: string } | string | Callback, callback?: Callback): void {
     if (typeof options === 'function') {
         callback = options;
         options = undefined;
     }
 
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
             const buffer = typeof data === 'string' ? Buffer.from(data, (typeof options === 'string' ? options : (options as any)?.encoding) || 'utf8') :
                 (data instanceof Buffer ? data : Buffer.from(data));
 
-            NitroFileSystem.writeFile(path, buffer.buffer);
+            NitroFileSystem.writeFile(normalizedPath, buffer.buffer);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -1349,11 +1440,12 @@ export function writeFile(path: string, data: string | Buffer | Uint8Array, opti
     });
 }
 
-export function writeFileSync(path: string, data: string | Buffer | Uint8Array, options?: { encoding?: string; mode?: number; flag?: string } | string): void {
+export function writeFileSync(path: PathLike, data: string | Buffer | Uint8Array, options?: { encoding?: string; mode?: number; flag?: string } | string): void {
+    const normalizedPath = normalizePath(path);
     const buffer = typeof data === 'string' ? Buffer.from(data, (typeof options === 'string' ? options : (options as any)?.encoding) || 'utf8') :
         (data instanceof Buffer ? data : Buffer.from(data));
 
-    NitroFileSystem.writeFile(path, buffer.buffer);
+    NitroFileSystem.writeFile(normalizedPath, buffer.buffer);
 }
 
 // exports
@@ -1366,33 +1458,38 @@ import { ReadStream, ReadStreamOptions } from './ReadStream';
 import { WriteStream, WriteStreamOptions } from './WriteStream';
 import { Dir } from './Dir';
 
-export function createReadStream(path: string | Buffer, options?: string | ReadStreamOptions): ReadStream {
+export function createReadStream(path: PathLike | Buffer, options?: string | ReadStreamOptions): ReadStream {
     if (typeof options === 'string') {
         options = { encoding: options as BufferEncoding };
     }
-    return new ReadStream(path, options);
+    const p = (path instanceof Buffer) ? path : normalizePath(path);
+    return new ReadStream(p, options);
 }
 
-export function createWriteStream(path: string | Buffer, options?: string | WriteStreamOptions): WriteStream {
+export function createWriteStream(path: PathLike | Buffer, options?: string | WriteStreamOptions): WriteStream {
     if (typeof options === 'string') {
         options = { encoding: options as BufferEncoding };
     }
-    return new WriteStream(path, options);
+    const p = (path instanceof Buffer) ? path : normalizePath(path);
+    return new WriteStream(p, options);
 }
 
-export function opendirSync(path: string, options?: any): Dir {
-    const iterator = NitroFileSystem.opendir(path);
-    return new Dir(iterator, path);
+
+export function opendirSync(path: PathLike, options?: any): Dir {
+    const normalizedPath = normalizePath(path);
+    const iterator = NitroFileSystem.opendir(normalizedPath);
+    return new Dir(iterator, normalizedPath);
 }
 
-export function opendir(path: string, options?: any | ((err: NodeJS.ErrnoException | null, dir: Dir) => void), callback?: (err: NodeJS.ErrnoException | null, dir: Dir) => void): void {
+export function opendir(path: PathLike, options?: any | ((err: NodeJS.ErrnoException | null, dir: Dir) => void), callback?: (err: NodeJS.ErrnoException | null, dir: Dir) => void): void {
     if (typeof options === 'function') {
         callback = options;
         options = undefined;
     }
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            const dir = opendirSync(path, options);
+            const dir = opendirSync(normalizedPath, options);
             callback?.(null, dir);
         } catch (e: any) {
             callback?.(e, null as any);
@@ -1407,11 +1504,11 @@ import { FSWatcher, WatchEventType, WatchListener } from './FSWatcher';
  * Returns an FSWatcher that emits 'change' events.
  */
 export function watch(
-    filename: string | Buffer,
+    filename: PathLike | Buffer,
     options?: { persistent?: boolean; recursive?: boolean; encoding?: BufferEncoding } | WatchListener,
     listener?: WatchListener
 ): FSWatcher {
-    const path = typeof filename === 'string' ? filename : filename.toString();
+    const path = (filename instanceof Buffer) ? filename.toString() : normalizePath(filename);
 
     if (typeof options === 'function') {
         listener = options;
@@ -1430,8 +1527,8 @@ export function watch(
 /**
  * Creates a bookmark:// URI (base64 encoded bookmark data) from a physical path.
  */
-export function getBookmark(path: string): string {
-    return NitroFileSystem.getBookmark(path);
+export function getBookmark(path: PathLike): string {
+    return NitroFileSystem.getBookmark(normalizePath(path));
 }
 
 /**
@@ -1450,7 +1547,7 @@ export function getTempPath(): string {
 
 // --- Promises API ---
 export const promises = {
-    open: async (path: string, flags: string | number = 'r', mode: number = 0o666): Promise<number> => {
+    open: async (path: PathLike, flags: string | number = 'r', mode: number = 0o666): Promise<number> => {
         return new Promise((resolve, reject) => {
             open(path, flags, mode, (err, fd) => {
                 if (err) reject(err);
@@ -1474,7 +1571,7 @@ export const promises = {
             });
         });
     },
-    readFile: async (path: string, options?: { encoding?: string; flag?: string } | string): Promise<string | Buffer> => {
+    readFile: async (path: PathLike, options?: { encoding?: string; flag?: string } | string): Promise<string | Buffer> => {
         return new Promise((resolve, reject) => {
             readFile(path, options, (err, data) => {
                 if (err) reject(err);
@@ -1482,13 +1579,13 @@ export const promises = {
             });
         });
     },
-    getBookmark: async (path: string): Promise<string> => {
-        return NitroFileSystem.getBookmark(path);
+    getBookmark: async (path: PathLike): Promise<string> => {
+        return getBookmark(path);
     },
     resolveBookmark: async (bookmark: string): Promise<string> => {
         return NitroFileSystem.resolveBookmark(bookmark);
     },
-    writeFile: async (path: string, data: string | Buffer | Uint8Array, options?: { encoding?: string; mode?: number; flag?: string } | string): Promise<void> => {
+    writeFile: async (path: PathLike, data: string | Buffer | Uint8Array, options?: { encoding?: string; mode?: number; flag?: string } | string): Promise<void> => {
         return new Promise((resolve, reject) => {
             writeFile(path, data, options, (err) => {
                 if (err) reject(err);
@@ -1496,7 +1593,7 @@ export const promises = {
             });
         });
     },
-    unlink: async (path: string): Promise<void> => {
+    unlink: async (path: PathLike): Promise<void> => {
         return new Promise((resolve, reject) => {
             unlink(path, (err) => {
                 if (err) reject(err);
@@ -1504,7 +1601,7 @@ export const promises = {
             });
         });
     },
-    mkdir: async (path: string, mode?: number): Promise<void> => {
+    mkdir: async (path: PathLike, mode?: number): Promise<void> => {
         return new Promise((resolve, reject) => {
             mkdir(path, mode, (err) => {
                 if (err) reject(err);
@@ -1512,7 +1609,7 @@ export const promises = {
             });
         });
     },
-    rmdir: async (path: string): Promise<void> => {
+    rmdir: async (path: PathLike): Promise<void> => {
         return new Promise((resolve, reject) => {
             rmdir(path, (err) => {
                 if (err) reject(err);
@@ -1520,7 +1617,7 @@ export const promises = {
             });
         });
     },
-    readdir: async (path: string): Promise<string[]> => {
+    readdir: async (path: PathLike): Promise<string[]> => {
         return new Promise((resolve, reject) => {
             readdir(path, (err, files) => {
                 if (err) reject(err);
@@ -1528,7 +1625,7 @@ export const promises = {
             });
         });
     },
-    rename: async (oldPath: string, newPath: string): Promise<void> => {
+    rename: async (oldPath: PathLike, newPath: PathLike): Promise<void> => {
         return new Promise((resolve, reject) => {
             rename(oldPath, newPath, (err) => {
                 if (err) reject(err);
@@ -1536,7 +1633,7 @@ export const promises = {
             });
         });
     },
-    copyFile: async (src: string, dest: string, flags: number = 0): Promise<void> => {
+    copyFile: async (src: PathLike, dest: PathLike, flags: number = 0): Promise<void> => {
         return new Promise((resolve, reject) => {
             copyFile(src, dest, flags, (err) => {
                 if (err) reject(err);
@@ -1544,7 +1641,7 @@ export const promises = {
             });
         });
     },
-    link: async (existingPath: string, newPath: string): Promise<void> => {
+    link: async (existingPath: PathLike, newPath: PathLike): Promise<void> => {
         return new Promise((resolve, reject) => {
             link(existingPath, newPath, (err) => {
                 if (err) reject(err);
@@ -1552,7 +1649,7 @@ export const promises = {
             });
         });
     },
-    symlink: async (target: string, path: string, type?: string): Promise<void> => {
+    symlink: async (target: PathLike, path: PathLike, type?: string): Promise<void> => {
         return new Promise((resolve, reject) => {
             symlink(target, path, type, (err) => {
                 if (err) reject(err);
@@ -1560,7 +1657,7 @@ export const promises = {
             });
         });
     },
-    readlink: async (path: string, options?: { encoding?: string } | string): Promise<string> => {
+    readlink: async (path: PathLike, options?: { encoding?: string } | string): Promise<string> => {
         return new Promise((resolve, reject) => {
             readlink(path, options, (err, res) => {
                 if (err) reject(err);
@@ -1568,7 +1665,7 @@ export const promises = {
             });
         });
     },
-    realpath: async (path: string, options?: { encoding?: string } | string): Promise<string> => {
+    realpath: async (path: PathLike, options?: { encoding?: string } | string): Promise<string> => {
         return new Promise((resolve, reject) => {
             realpath(path, options, (err, res) => {
                 if (err) reject(err);
@@ -1584,7 +1681,7 @@ export const promises = {
             });
         });
     },
-    rm: async (path: string, options?: RmOptions): Promise<void> => {
+    rm: async (path: PathLike, options?: RmOptions): Promise<void> => {
         return new Promise((resolve, reject) => {
             rm(path, options, (err) => {
                 if (err) reject(err);
@@ -1592,7 +1689,7 @@ export const promises = {
             });
         });
     },
-    stat: async (path: string): Promise<Stats> => {
+    stat: async (path: PathLike): Promise<Stats> => {
         return new Promise((resolve, reject) => {
             stat(path, (err, stats) => {
                 if (err) reject(err);
@@ -1600,7 +1697,7 @@ export const promises = {
             });
         });
     },
-    access: async (path: string, mode: number = constants.F_OK): Promise<void> => {
+    access: async (path: PathLike, mode: number = constants.F_OK): Promise<void> => {
         return new Promise((resolve, reject) => {
             access(path, mode, (err) => {
                 if (err) reject(err);
@@ -1608,7 +1705,7 @@ export const promises = {
             });
         });
     },
-    truncate: async (path: string, len: number = 0): Promise<void> => {
+    truncate: async (path: PathLike, len: number = 0): Promise<void> => {
         return new Promise((resolve, reject) => {
             truncate(path, len, (err) => {
                 if (err) reject(err);
@@ -1632,7 +1729,7 @@ export const promises = {
             });
         });
     },
-    chmod: async (path: string, mode: number): Promise<void> => {
+    chmod: async (path: PathLike, mode: number): Promise<void> => {
         return new Promise((resolve, reject) => {
             chmod(path, mode, (err) => {
                 if (err) reject(err);
@@ -1648,7 +1745,7 @@ export const promises = {
             });
         });
     },
-    chown: async (path: string, uid: number, gid: number): Promise<void> => {
+    chown: async (path: PathLike, uid: number, gid: number): Promise<void> => {
         return new Promise((resolve, reject) => {
             chown(path, uid, gid, (err) => {
                 if (err) reject(err);
@@ -1664,7 +1761,7 @@ export const promises = {
             });
         });
     },
-    utimes: async (path: string, atime: string | number | Date, mtime: string | number | Date): Promise<void> => {
+    utimes: async (path: PathLike, atime: string | number | Date, mtime: string | number | Date): Promise<void> => {
         return new Promise((resolve, reject) => {
             utimes(path, atime, mtime, (err) => {
                 if (err) reject(err);
@@ -1680,7 +1777,7 @@ export const promises = {
             });
         });
     },
-    appendFile: async (file: string | number | Buffer, data: string | Buffer, options?: { encoding?: BufferEncoding; mode?: number; flag?: string } | BufferEncoding): Promise<void> => {
+    appendFile: async (file: PathLike | number | Buffer, data: string | Buffer, options?: { encoding?: BufferEncoding; mode?: number; flag?: string } | BufferEncoding): Promise<void> => {
         return new Promise((resolve, reject) => {
             appendFile(file, data, options, (err) => {
                 if (err) reject(err);
@@ -1689,7 +1786,7 @@ export const promises = {
         });
     },
     // Phase 3: Additional Promises API
-    lstat: async (path: string): Promise<Stats> => {
+    lstat: async (path: PathLike): Promise<Stats> => {
         return new Promise((resolve, reject) => {
             lstat(path, (err, stats) => {
                 if (err) reject(err);
@@ -1697,7 +1794,7 @@ export const promises = {
             });
         });
     },
-    lchmod: async (path: string, mode: number): Promise<void> => {
+    lchmod: async (path: PathLike, mode: number): Promise<void> => {
         return new Promise((resolve, reject) => {
             lchmod(path, mode, (err) => {
                 if (err) reject(err);
@@ -1705,7 +1802,7 @@ export const promises = {
             });
         });
     },
-    lchown: async (path: string, uid: number, gid: number): Promise<void> => {
+    lchown: async (path: PathLike, uid: number, gid: number): Promise<void> => {
         return new Promise((resolve, reject) => {
             lchown(path, uid, gid, (err) => {
                 if (err) reject(err);
@@ -1713,7 +1810,7 @@ export const promises = {
             });
         });
     },
-    lutimes: async (path: string, atime: string | number | Date, mtime: string | number | Date): Promise<void> => {
+    lutimes: async (path: PathLike, atime: string | number | Date, mtime: string | number | Date): Promise<void> => {
         return new Promise((resolve, reject) => {
             lutimes(path, atime, mtime, (err) => {
                 if (err) reject(err);
@@ -1721,7 +1818,7 @@ export const promises = {
             });
         });
     },
-    opendir: async (path: string, options?: any): Promise<Dir> => {
+    opendir: async (path: PathLike, options?: any): Promise<Dir> => {
         return new Promise((resolve, reject) => {
             opendir(path, options, (err, dir) => {
                 if (err) reject(err);
@@ -1742,8 +1839,8 @@ interface StatWatcher {
 
 const statWatchers = new Map<string, StatWatcher>();
 
-export function watchFile(filename: string, options: { interval?: number; persistent?: boolean } | ((curr: Stats, prev: Stats) => void), listener?: (curr: Stats, prev: Stats) => void): void {
-    const path = filename; // Normalize?
+export function watchFile(filename: PathLike, options: { interval?: number; persistent?: boolean } | ((curr: Stats, prev: Stats) => void), listener?: (curr: Stats, prev: Stats) => void): void {
+    const path = normalizePath(filename);
     let interval = 5007;
     let cb: ((curr: Stats, prev: Stats) => void) | undefined;
 
@@ -1820,8 +1917,9 @@ export function watchFile(filename: string, options: { interval?: number; persis
     }
 }
 
-export function unwatchFile(filename: string, listener?: (curr: Stats, prev: Stats) => void): void {
-    const watcher = statWatchers.get(filename);
+export function unwatchFile(filename: PathLike, listener?: (curr: Stats, prev: Stats) => void): void {
+    const path = normalizePath(filename);
+    const watcher = statWatchers.get(path);
     if (!watcher) return;
 
     if (listener) {
@@ -1832,11 +1930,11 @@ export function unwatchFile(filename: string, listener?: (curr: Stats, prev: Sta
 
     if (watcher.listeners.length === 0) {
         clearInterval(watcher.timer);
-        statWatchers.delete(filename);
+        statWatchers.delete(path);
     }
 }
 
-export function existsSync(path: string): boolean {
+export function existsSync(path: PathLike): boolean {
     try {
         accessSync(path, constants.F_OK);
         return true;
@@ -1845,7 +1943,7 @@ export function existsSync(path: string): boolean {
     }
 }
 
-export function exists(path: string, callback: (exists: boolean) => void): void {
+export function exists(path: PathLike, callback: (exists: boolean) => void): void {
     access(path, constants.F_OK, (err) => {
         callback(!err);
     });
@@ -1890,8 +1988,9 @@ export class Dirent {
 }
 
 
-export function readdirSync(path: string, options?: { encoding?: BufferEncoding | null; withFileTypes?: boolean } | BufferEncoding | null): string[] | Dirent[] {
-    const files = NitroFileSystem.readdir(path);
+export function readdirSync(path: PathLike, options?: { encoding?: BufferEncoding | null; withFileTypes?: boolean } | BufferEncoding | null): string[] | Dirent[] {
+    const normalizedPath = normalizePath(path);
+    const files = NitroFileSystem.readdir(normalizedPath);
     let withFileTypes = false;
 
     if (typeof options === 'object' && options !== null) {
@@ -1905,7 +2004,7 @@ export function readdirSync(path: string, options?: { encoding?: BufferEncoding 
     // Map to Dirent
     return files.map(file => {
         try {
-            const s = lstatSync(`${path}/${file}`); // Using lstat to properly identify symlinks
+            const s = lstatSync(`${normalizedPath}/${file}`); // Using lstat to properly identify symlinks
             // s.mode may be number or bigint depending on Stats/BigIntStats
             return new Dirent(file, Number(s.mode));
         } catch {
@@ -1916,7 +2015,7 @@ export function readdirSync(path: string, options?: { encoding?: BufferEncoding 
     });
 }
 
-export function readdir(path: string, options?: { encoding?: BufferEncoding | null; withFileTypes?: boolean } | BufferEncoding | null | ReaddirCallback, callback?: ReaddirCallback): void {
+export function readdir(path: PathLike, options?: { encoding?: BufferEncoding | null; withFileTypes?: boolean } | BufferEncoding | null | ReaddirCallback, callback?: ReaddirCallback): void {
     let cb: ReaddirCallback;
     let withFileTypes = false;
 
@@ -1930,9 +2029,10 @@ export function readdir(path: string, options?: { encoding?: BufferEncoding | nu
         }
     }
 
+    const normalizedPath = normalizePath(path);
     setImmediate(() => {
         try {
-            const res = readdirSync(path, { withFileTypes });
+            const res = readdirSync(normalizedPath, { withFileTypes });
             cb(null, res as any);
         } catch (e: any) {
             cb(e);

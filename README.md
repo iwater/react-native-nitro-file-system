@@ -14,6 +14,8 @@ A high-performance, Node.js-compatible file system (fs) module for React Native,
 - 🛠️ **Node.js Compatible API**: Supports `fs` methods like `readFile`, `writeFile`, `mkdir`, `stat`, and more (Sync & Async).
 - 🏗️ **Streaming Support**: Built-in `ReadStream` and `WriteStream` for efficient data processing.
 - 📂 **Directory & Watcher**: Support for directory iteration and file system watching.
+- 🌐 **URL Path Support**: Handle `file://` URIs and standard `URL` objects with automatic percent-encoding (e.g., `%20`) decoding.
+
 
 ## Comparison with other Libraries
 
@@ -65,6 +67,31 @@ fs.readFile('/path/to/file.txt', 'utf8', (err, data) => {
 // Using Promises
 const content = await fs.promises.readFile('/path/to/file.txt', 'utf8');
 ```
+
+### URL-style Path Support
+
+The library provides robust support for URL-style paths and standard `URL` objects across all API methods. This is particularly useful when working with Expo or React Native components that return `file://` URIs.
+
+- **Automatic Decoding**: Percent-encoded characters (like `%20` for spaces) are automatically decoded.
+- **Protocol Handling**: Both `file://` and `file:/` prefixes are supported.
+- **URL Objects**: You can pass standard JavaScript `URL` objects directly to any `fs` method.
+
+```typescript
+import fs from 'react-native-nitro-file-system';
+
+// 1. Using file:// URI strings with percent encoding
+const uri = 'file:///path/to/my%20document.txt';
+fs.writeFileSync(uri, 'Content with spaces');
+
+// 2. Using standard URL objects
+const url = new URL('file:///path/to/config.json');
+const data = fs.readFileSync(url, 'utf8');
+
+// 3. Works with all APIs including Streams and Promises
+const promiseContent = await fs.promises.readFile(new URL('file:///path/abc.txt'));
+const stream = fs.createReadStream('file:///path/to/large_file.bin');
+```
+
 
 
 ### Android Content URIs

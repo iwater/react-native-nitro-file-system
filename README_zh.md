@@ -9,6 +9,8 @@
 - 🛠️ **Node.js 兼容 API**：支持 `readFile`, `writeFile`, `mkdir`, `stat` 等常用 `fs` 方法（同步与异步）。
 - 🏗️ **流式支持**：内置 `ReadStream` 和 `WriteStream`，适用于大数据流处理。
 - 📂 **目录与监听**：支持目录迭代查询及文件系统变更监听。
+- 🌐 **URL 路径协议支持**：支持 `file://` URI 和标准 `URL` 对象，并自动解码百分号编码（如 `%20`）。
+
 
 ## 与其他库的对比
 
@@ -60,6 +62,31 @@ fs.readFile('/path/to/file.txt', 'utf8', (err, data) => {
 // 使用 Promise
 const content = await fs.promises.readFile('/path/to/file.txt', 'utf8');
 ```
+
+### URL 路径协议支持
+
+本库在所有 API 方法中均支持 URL 风格的路径字符串及标准 `URL` 对象。这在处理 Expo 或 React Native 组件返回的 `file://` URI 时非常有用。
+
+- **自动解码**：路径中的百分号编码（如用 `%20` 表示空格）会被自动解码。
+- **协议透明**：支持 `file://` 和 `file:/` 前缀。
+- **URL 对象支持**：你可以将标准 JavaScript `URL` 对象直接传递给任何 `fs` 方法。
+
+```typescript
+import fs from 'react-native-nitro-file-system';
+
+// 1. 使用带百分号编码的 file:// 字符串
+const uri = 'file:///path/to/my%20document.txt';
+fs.writeFileSync(uri, '包含空格的内容');
+
+// 2. 直接使用标准 URL 对象
+const url = new URL('file:///path/to/config.json');
+const data = fs.readFileSync(url, 'utf8');
+
+// 3. 兼容所有 API，包括流和 Promise
+const promiseContent = await fs.promises.readFile(new URL('file:///path/abc.txt'));
+const stream = fs.createReadStream('file:///path/to/large_file.bin');
+```
+
 
 
 ### Android Content URI 支持

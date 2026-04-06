@@ -1,7 +1,8 @@
 import { Writable, WritableOptions } from 'readable-stream';
 import { NitroFileSystem } from './native';
 import { Buffer } from 'react-native-nitro-buffer';
-import { getFlags } from './index';
+import { getFlags, PathLike, normalizePath } from './index';
+
 
 export interface WriteStreamOptions extends WritableOptions {
     flags?: string;
@@ -14,7 +15,8 @@ export interface WriteStreamOptions extends WritableOptions {
 }
 
 export class WriteStream extends Writable {
-    path: string | Buffer;
+    path: PathLike | Buffer;
+
     fd: number | null;
     flags: string = 'w';
     mode: number = 0o666;
@@ -25,7 +27,8 @@ export class WriteStream extends Writable {
     _fileClosed: boolean = false;
     pending: boolean = false;
 
-    constructor(path: string | Buffer, options?: WriteStreamOptions) {
+    constructor(path: PathLike | Buffer, options?: WriteStreamOptions) {
+
         // @ts-ignore
         super(options);
 
@@ -58,13 +61,12 @@ export class WriteStream extends Writable {
         const flagNum = getFlags(this.flags);
 
         try {
-            if (typeof this.path !== 'string') throw new Error("Path must be string");
-
             setImmediate(() => {
                 try {
-                    const fd = NitroFileSystem.open(this.path as string, flagNum, this.mode);
+                    const normalizedPath = (this.path instanceof Buffer) ? this.path.toString() : normalizePath(this.path);
+                    const fd = NitroFileSystem.open(normalizedPath, flagNum, this.mode);
                     if (fd < 0) {
-                        this.emit('error', new Error(`ENOENT: no such file or directory, open '${this.path}'`));
+                        this.emit('error', new Error(`ENOENT: no such file or directory, open '${normalizedPath}'`));
                         this._fileClosed = true;
                         return;
                     }

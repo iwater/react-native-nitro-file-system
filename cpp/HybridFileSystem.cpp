@@ -28,8 +28,10 @@ Stats toStats(const RNStats &s) {
                s.atime_ms, s.mtime_ms, s.ctime_ms, s.birthtime_ms);
 }
 
-double HybridFileSystem::open(const std::string &path, double flags,
+double HybridFileSystem::open(const std::string &rawPath, double flags,
                               double mode) {
+  std::string path = normalizePath(rawPath);
+
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
     JNIEnv *env = getJNIEnv();
@@ -125,7 +127,9 @@ double HybridFileSystem::write(double fd,
                      static_cast<int64_t>(position));
 }
 
-void HybridFileSystem::access(const std::string &path, double mode) {
+void HybridFileSystem::access(const std::string &rawPath, double mode) {
+  std::string path = normalizePath(rawPath);
+
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
     JNIEnv *env = getJNIEnv();
@@ -159,7 +163,8 @@ void HybridFileSystem::access(const std::string &path, double mode) {
   }
 }
 
-void HybridFileSystem::truncate(const std::string &path, double len) {
+void HybridFileSystem::truncate(const std::string &rawPath, double len) {
+  std::string path = normalizePath(rawPath);
   if (rn_fs_truncate(path.c_str(), static_cast<size_t>(len)) != 0) {
     throw std::runtime_error("truncate failed: " + path);
   }
@@ -177,13 +182,15 @@ void HybridFileSystem::fsync(double fd) {
   }
 }
 
-void HybridFileSystem::chmod(const std::string &path, double mode) {
+void HybridFileSystem::chmod(const std::string &rawPath, double mode) {
+  std::string path = normalizePath(rawPath);
   if (rn_fs_chmod(path.c_str(), static_cast<int>(mode)) != 0) {
     throw std::runtime_error("chmod failed: " + path);
   }
 }
 
-void HybridFileSystem::lchmod(const std::string &path, double mode) {
+void HybridFileSystem::lchmod(const std::string &rawPath, double mode) {
+  std::string path = normalizePath(rawPath);
   if (rn_fs_lchmod(path.c_str(), static_cast<uint32_t>(mode)) != 0) {
     throw std::runtime_error("lchmod failed: " + path);
   }
@@ -195,14 +202,16 @@ void HybridFileSystem::fchmod(double fd, double mode) {
   }
 }
 
-void HybridFileSystem::chown(const std::string &path, double uid, double gid) {
+void HybridFileSystem::chown(const std::string &rawPath, double uid, double gid) {
+  std::string path = normalizePath(rawPath);
   if (rn_fs_chown(path.c_str(), static_cast<int>(uid), static_cast<int>(gid)) !=
       0) {
     throw std::runtime_error("chown failed: " + path);
   }
 }
 
-void HybridFileSystem::lchown(const std::string &path, double uid, double gid) {
+void HybridFileSystem::lchown(const std::string &rawPath, double uid, double gid) {
+  std::string path = normalizePath(rawPath);
   if (rn_fs_lchown(path.c_str(), static_cast<uint32_t>(uid),
                    static_cast<uint32_t>(gid)) != 0) {
     throw std::runtime_error("lchown failed: " + path);
@@ -216,15 +225,18 @@ void HybridFileSystem::fchown(double fd, double uid, double gid) {
   }
 }
 
-void HybridFileSystem::utimes(const std::string &path, double atime,
+void HybridFileSystem::utimes(const std::string &rawPath, double atime,
                               double mtime) {
+  std::string path = normalizePath(rawPath);
   if (rn_fs_utimes(path.c_str(), atime, mtime) != 0) {
+
     throw std::runtime_error("utimes failed: " + path);
   }
 }
 
-void HybridFileSystem::lutimes(const std::string &path, double atime,
+void HybridFileSystem::lutimes(const std::string &rawPath, double atime,
                                double mtime) {
+  std::string path = normalizePath(rawPath);
   if (rn_fs_lutimes(path.c_str(), static_cast<int64_t>(atime),
                     static_cast<int64_t>(mtime)) != 0) {
     throw std::runtime_error("lutimes failed: " + path);
@@ -237,22 +249,29 @@ void HybridFileSystem::futimes(double fd, double atime, double mtime) {
   }
 }
 
-void HybridFileSystem::link(const std::string &existingPath,
-                            const std::string &newPath) {
+void HybridFileSystem::link(const std::string &rawExistingPath,
+                            const std::string &rawNewPath) {
+  std::string existingPath = normalizePath(rawExistingPath);
+  std::string newPath = normalizePath(rawNewPath);
   if (rn_fs_link(existingPath.c_str(), newPath.c_str()) != 0) {
+
     throw std::runtime_error("link failed: " + existingPath + " -> " + newPath);
   }
 }
 
-void HybridFileSystem::symlink(const std::string &target,
-                               const std::string &path) {
+void HybridFileSystem::symlink(const std::string &rawTarget,
+                               const std::string &rawPath) {
+  std::string target = normalizePath(rawTarget);
+  std::string path = normalizePath(rawPath);
   if (rn_fs_symlink(target.c_str(), path.c_str()) != 0) {
     throw std::runtime_error("symlink failed: " + target + " -> " + path);
   }
 }
 
-std::string HybridFileSystem::readlink(const std::string &path) {
+std::string HybridFileSystem::readlink(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
   char *res = rn_fs_readlink(path.c_str());
+
   if (res == nullptr) {
     throw std::runtime_error("readlink failed: " + path);
   }
@@ -261,7 +280,9 @@ std::string HybridFileSystem::readlink(const std::string &path) {
   return result;
 }
 
-std::string HybridFileSystem::realpath(const std::string &path) {
+std::string HybridFileSystem::realpath(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
+
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
     return path;
@@ -292,7 +313,9 @@ std::string HybridFileSystem::mkdtemp(const std::string &prefix) {
   return result;
 }
 
-void HybridFileSystem::rm(const std::string &path, bool recursive) {
+void HybridFileSystem::rm(const std::string &rawPath, bool recursive) {
+  std::string path = normalizePath(rawPath);
+
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
     this->unlink(path);
@@ -312,7 +335,9 @@ void HybridFileSystem::rm(const std::string &path, bool recursive) {
   }
 }
 
-Stats HybridFileSystem::stat(const std::string &path) {
+Stats HybridFileSystem::stat(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
+
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
     JNIEnv *env = getJNIEnv();
@@ -367,7 +392,9 @@ Stats HybridFileSystem::stat(const std::string &path) {
   throw std::runtime_error("stat failed: " + path);
 }
 
-Stats HybridFileSystem::lstat(const std::string &path) {
+Stats HybridFileSystem::lstat(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
+
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
     // For content URIs, lstat is equivalent to stat
@@ -395,20 +422,23 @@ Stats HybridFileSystem::fstat(double fd) {
   throw std::runtime_error("fstat failed");
 }
 
-void HybridFileSystem::mkdir(const std::string &path, double mode,
+void HybridFileSystem::mkdir(const std::string &rawPath, double mode,
                              bool recursive) {
+  std::string path = normalizePath(rawPath);
   if (!rn_fs_mkdir(path.c_str(), static_cast<uint32_t>(mode), recursive)) {
     throw std::runtime_error("mkdir failed: " + path);
   }
 }
 
-void HybridFileSystem::rmdir(const std::string &path) {
+void HybridFileSystem::rmdir(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
   if (rn_fs_rmdir(path.c_str()) != 0) {
     throw std::runtime_error("rmdir failed: " + path);
   }
 }
 
-std::vector<std::string> HybridFileSystem::readdir(const std::string &path) {
+std::vector<std::string> HybridFileSystem::readdir(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
   std::vector<std::string> results;
   DirIter *iter = rn_fs_readdir_open(path.c_str());
   if (!iter) {
@@ -425,7 +455,9 @@ std::vector<std::string> HybridFileSystem::readdir(const std::string &path) {
   return results;
 }
 
-void HybridFileSystem::unlink(const std::string &path) {
+void HybridFileSystem::unlink(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
+
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
     JNIEnv *env = getJNIEnv();
@@ -459,15 +491,20 @@ void HybridFileSystem::unlink(const std::string &path) {
   }
 }
 
-void HybridFileSystem::rename(const std::string &oldPath,
-                              const std::string &newPath) {
+void HybridFileSystem::rename(const std::string &rawOldPath,
+                               const std::string &rawNewPath) {
+  std::string oldPath = normalizePath(rawOldPath);
+  std::string newPath = normalizePath(rawNewPath);
   if (rn_fs_rename(oldPath.c_str(), newPath.c_str()) != 0) {
     throw std::runtime_error("rename failed");
   }
 }
 
-void HybridFileSystem::copyFile(const std::string &src, const std::string &dest,
+void HybridFileSystem::copyFile(const std::string &rawSrc, const std::string &rawDest,
                                 double flags) {
+  std::string src = normalizePath(rawSrc);
+  std::string dest = normalizePath(rawDest);
+
 #ifdef __ANDROID__
   if (src.find("content://") == 0 || dest.find("content://") == 0) {
     JNIEnv *env = getJNIEnv();
@@ -512,7 +549,9 @@ void HybridFileSystem::copyFile(const std::string &src, const std::string &dest,
 }
 
 std::shared_ptr<ArrayBuffer>
-HybridFileSystem::readFile(const std::string &path) {
+HybridFileSystem::readFile(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
+
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
     // 1. Open
@@ -602,8 +641,9 @@ HybridFileSystem::readFile(const std::string &path) {
   return buffer;
 }
 
-void HybridFileSystem::writeFile(const std::string &path,
+void HybridFileSystem::writeFile(const std::string &rawPath,
                                  const std::shared_ptr<ArrayBuffer> &buffer) {
+  std::string path = normalizePath(rawPath);
   if (!buffer) {
     throw std::runtime_error("buffer is null");
   }
@@ -640,7 +680,8 @@ void HybridFileSystem::writeFile(const std::string &path,
   }
 }
 
-std::string HybridFileSystem::getBookmark(const std::string &path) {
+std::string HybridFileSystem::getBookmark(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
 #ifdef __APPLE__
   return ::nitro::fs::getBookmark(path);
 #endif
@@ -665,7 +706,8 @@ std::string HybridFileSystem::getTempPath() {
 }
 
 std::shared_ptr<HybridHybridDirIteratorSpec>
-HybridFileSystem::opendir(const std::string &path) {
+HybridFileSystem::opendir(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
   DirIter *iter = rn_fs_readdir_open(path.c_str());
   if (iter == nullptr) {
     throw std::runtime_error("opendir failed: " + path);
@@ -674,11 +716,22 @@ HybridFileSystem::opendir(const std::string &path) {
 }
 
 std::shared_ptr<HybridHybridFileWatcherSpec> HybridFileSystem::watch(
-    const std::string &path,
+    const std::string &rawPath,
     const std::function<void(const std::string &, const std::string &)>
         &onChange) {
+  std::string path = normalizePath(rawPath);
   return std::make_shared<HybridFileWatcher>(path, onChange);
 }
+
+std::string HybridFileSystem::normalizePath(const std::string &path) {
+  if (path.find("file://") == 0) {
+    return path.substr(7);
+  } else if (path.find("file:/") == 0) {
+    return path.substr(5);
+  }
+  return path;
+}
+
 
 double HybridFileSystem::readv(
     double fd, const std::vector<std::shared_ptr<ArrayBuffer>> &buffers,
