@@ -200,6 +200,8 @@ public class NitroFileSystemUtils {
     private static final int PICK_DIR_REQUEST_CODE = 4002;
 
     private static long pendingFilesPromisePtr = 0;
+    private static String pendingFilesMode = "open";
+    private static boolean pendingFilesLongTerm = false;
     private static long pendingDirPromisePtr = 0;
 
     private static final ActivityEventListener mActivityEventListener = new BaseActivityEventListener() {
@@ -207,6 +209,9 @@ public class NitroFileSystemUtils {
         public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
             if (requestCode == PICK_FILES_REQUEST_CODE) {
                 long promisePtr = pendingFilesPromisePtr;
+                String mode = pendingFilesMode;
+                boolean longTerm = pendingFilesLongTerm;
+                
                 pendingFilesPromisePtr = 0;
                 reactContext.removeActivityEventListener(this);
 
@@ -220,10 +225,10 @@ public class NitroFileSystemUtils {
                     if (data.getClipData() != null) {
                         for (int i = 0; i < data.getClipData().getItemCount(); i++) {
                             Uri uri = data.getClipData().getItemAt(i).getUri();
-                            results.add(parseUri(uri));
+                            results.add(processPickedFile(uri, mode, longTerm));
                         }
                     } else if (data.getData() != null) {
-                        results.add(parseUri(data.getData()));
+                        results.add(processPickedFile(data.getData(), mode, longTerm));
                     }
 
                     nativeOnFilesPicked(promisePtr, results.toArray(new PickerResult[0]));
@@ -258,6 +263,47 @@ public class NitroFileSystemUtils {
             }
         }
     };
+
+    private static PickerResult processPickedFile(Uri uri, String mode, boolean longTerm) {
+        if ("import".equals(mode)) {
+            // Import mode: Copy to cache
+            PickerResult res = parseUri(uri);
+            try {
+                String fileName = res.name;
+                if (fileName == null || fileName.isEmpty()) {
+                    fileName = "imported_file_" + System.currentTimeMillis();
+                }
+                java.io.File cacheDir = context.getCacheDir();
+                java.io.File destFile = new java.io.File(cacheDir, fileName);
+                
+                // Ensure unique filename if exists
+                int count = 0;
+                while (destFile.exists()) {
+                    count++;
+                    destFile = new java.io.File(cacheDir, count + "_" + fileName);
+                }
+                
+                if (copyContentUri(uri.toString(), destFile.getAbsolutePath())) {
+                    res.path = destFile.getAbsolutePath();
+                    res.bookmark = ""; // No bookmark needed for local file
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to import file: " + uri.toString(), e);
+            }
+            return res;
+        } else {
+            // Open mode: Use original URI
+            if (longTerm) {
+                try {
+                    final int takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+                    reactContext.getContentResolver().takePersistableUriPermission(uri, takeFlags);
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to take persistable permission for file: " + uri.toString());
+                }
+            }
+            return parseUri(uri);
+        }
+    }
 
     public static String[] listContentUri(String uriString) {
         try {
@@ -322,7 +368,7 @@ public class NitroFileSystemUtils {
         return res;
     }
 
-    public static void pickFiles(boolean multiple, String[] extensions, boolean requestLongTermAccess, long promisePtr) {
+    public static void pickFiles(boolean multiple, String[] extensions, boolean requestLongTermAccess, String mode, long promisePtr) {
         if (reactContext == null) {
             nativeOnFilesPickError(promisePtr, "React Context not initialized");
             return;
@@ -334,8 +380,14 @@ public class NitroFileSystemUtils {
             return;
         }
 
+        // Use ACTION_OPEN_DOCUMENT for both to ensure we get a URI we can copy if needed.
+        // ACTION_GET_CONTENT is older and sometimes less reliable for stream copying.
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
+        
+        if ("open".equals(mode)) {
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        }
         
         // Handle MimeTypes from extensions mapping
         String primaryMimeType = "*/*";
@@ -362,6 +414,9 @@ public class NitroFileSystemUtils {
         }
 
         pendingFilesPromisePtr = promisePtr;
+        pendingFilesMode = mode;
+        pendingFilesLongTerm = requestLongTermAccess;
+        
         reactContext.addActivityEventListener(mActivityEventListener);
         
         try {

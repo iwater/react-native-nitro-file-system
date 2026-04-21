@@ -2,10 +2,13 @@ import { HybridObject, NitroModules } from 'react-native-nitro-modules'
 import { HybridDirIterator } from './HybridDirIterator.nitro'
 import { HybridFileWatcher } from './HybridFileWatcher.nitro'
 
+export type PickerMode = 'open' | 'import'
+
 export interface PickerOptions {
     multiple?: boolean;
     extensions?: string[];
     requestLongTermAccess?: boolean;
+    mode?: PickerMode;
 }
 
 export interface PickedFile {

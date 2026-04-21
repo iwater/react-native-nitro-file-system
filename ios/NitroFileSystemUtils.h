@@ -10,7 +10,7 @@
 namespace nitro {
 namespace fs {
 
-void pickFilesIOS(bool multiple, bool requestLongTermAccess, const std::vector<std::string>& extensions,
+void pickFilesIOS(bool multiple, bool requestLongTermAccess, margelo::nitro::node_fs::PickerMode mode, const std::vector<std::string>& extensions,
                   std::function<void(const std::vector<margelo::nitro::node_fs::PickedFile>&)> resolve,
                   std::function<void(const std::string&)> reject);
 

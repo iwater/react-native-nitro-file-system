@@ -142,23 +142,33 @@ Nitro File System includes a high-performance native file and directory picker t
 ```typescript
 import fs, { pickFiles, pickDirectory } from 'react-native-nitro-file-system';
 
-// 1. Pick multiple images
-const files = await pickFiles({
+// 1. Pick and Import multiple images (copies to app cache)
+const importedFiles = await pickFiles({
   multiple: true,
-  extensions: ['.jpg', '.png'],
-  requestLongTermAccess: true // Get persistent access
+  mode: 'import',
+  extensions: ['.jpg', '.png']
 });
 
-for (const file of files) {
-  console.log(`Picked: ${file.name} at ${file.path}`);
+for (const file of importedFiles) {
+  console.log(`Imported to cache: ${file.path}`);
+  // No need for long-term access request for imported files
+}
+
+// 2. Pick and Open files in-place (persistent access)
+const openedFiles = await pickFiles({
+  multiple: true,
+  mode: 'open',
+  requestLongTermAccess: true 
+});
+
+for (const file of openedFiles) {
+  console.log(`Resource path: ${file.path}`);
   if (file.bookmark) {
     console.log(`Persistent bookmark: ${file.bookmark}`);
   }
-  // Read the file directly using its path
-  const data = await fs.promises.readFile(file.path);
 }
 
-// 2. Pick a directory
+// 3. Pick a directory
 const picked = await pickDirectory({
   requestLongTermAccess: true
 });
@@ -176,8 +186,9 @@ console.log(entries);
 | Option | Type | Description |
 | :--- | :--- | :--- |
 | `multiple` | `boolean` | Allow multiple file selection (Default: `false`). Only for `pickFiles`. |
+| `mode` | `'open' \| 'import'` | **`'open'`**: Access file in-place (Original URI). <br> **`'import'`**: Copy file to app cache and return local path. (Default: `'open'`) |
 | `extensions` | `string[]` | Specific file extensions to filter (e.g., `['.pdf', '.docx']`). Only for `pickFiles`. |
-| `requestLongTermAccess` | `boolean` | If `true`, Android will take persistable URI permission and iOS will return a `bookmark://` URI. |
+| `requestLongTermAccess` | `boolean` | If `true`, Android will take persistable URI permission and iOS will return a `bookmark://` URI. Recommended for `'open'` mode. |
 
 #### Picked Result
 - `pickFiles` returns `Promise<PickedFile[]>`

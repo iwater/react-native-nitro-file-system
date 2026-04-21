@@ -436,7 +436,7 @@ void stopAccessingBookmark(void *token) {
   }
 }
 
-void pickFilesIOS(bool multiple, bool requestLongTermAccess, const std::vector<std::string>& extensions,
+void pickFilesIOS(bool multiple, bool requestLongTermAccess, margelo::nitro::node_fs::PickerMode mode, const std::vector<std::string>& extensions,
                   std::function<void(const std::vector<margelo::nitro::node_fs::PickedFile>&)> resolve,
                   std::function<void(const std::string&)> reject) {
   NSMutableArray<UTType *> *types = [NSMutableArray array];
@@ -462,14 +462,17 @@ void pickFilesIOS(bool multiple, bool requestLongTermAccess, const std::vector<s
     }
   }
   
+  BOOL asCopy = (mode == margelo::nitro::node_fs::PickerMode::IMPORT);
+  
   dispatch_async(dispatch_get_main_queue(), ^{
     UIDocumentPickerViewController *picker;
     if (@available(iOS 14.0, *)) {
-      picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:NO];
+      picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:asCopy];
     } else {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-      picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.content"] inMode:UIDocumentPickerModeOpen];
+      UIDocumentPickerMode uiMode = asCopy ? UIDocumentPickerModeImport : UIDocumentPickerModeOpen;
+      picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.content"] inMode:uiMode];
 #pragma clang diagnostic pop
     }
     

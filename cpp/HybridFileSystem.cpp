@@ -876,12 +876,13 @@ double HybridFileSystem::writev(
 std::shared_ptr<Promise<std::vector<PickedFile>>> HybridFileSystem::pickFiles(const PickerOptions& options) {
   auto promise = Promise<std::vector<PickedFile>>::create();
 #ifdef __APPLE__
-  bool multiple = options.multiple.has_value() ? options.multiple.value() : false;
-  bool requestLongTermAccess = options.requestLongTermAccess.has_value() ? options.requestLongTermAccess.value() : false;
-  std::vector<std::string> extensions = options.extensions.has_value() ? options.extensions.value() : std::vector<std::string>();
+  bool multiple = options.multiple.value_or(false);
+  bool requestLongTermAccess = options.requestLongTermAccess.value_or(false);
+  std::vector<std::string> extensions = options.extensions.value_or(std::vector<std::string>());
+  margelo::nitro::node_fs::PickerMode mode = options.mode.value_or(margelo::nitro::node_fs::PickerMode::OPEN);
 
-  ::nitro::fs::pickFilesIOS(multiple, requestLongTermAccess, extensions, 
-    [promise](const std::vector<PickedFile>& files) {
+  ::nitro::fs::pickFilesIOS(multiple, requestLongTermAccess, mode, extensions, 
+    [promise](const std::vector<margelo::nitro::node_fs::PickedFile>& files) {
       promise->resolve(files);
     },
     [promise](const std::string& error) {
@@ -893,10 +894,13 @@ std::shared_ptr<Promise<std::vector<PickedFile>>> HybridFileSystem::pickFiles(co
   if (env) {
     jclass cls = env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
     if (cls) {
-      jmethodID mid = env->GetStaticMethodID(cls, "pickFiles", "(Z[Ljava/lang/String;ZJ)V");
+      jmethodID mid = env->GetStaticMethodID(cls, "pickFiles", "(Z[Ljava/lang/String;ZLjava/lang/String;J)V");
       if (mid) {
-        bool multiple = options.multiple.has_value() && options.multiple.value();
-        bool requestLongTermAccess = options.requestLongTermAccess.has_value() && options.requestLongTermAccess.value();
+        bool multiple = options.multiple.value_or(false);
+        bool requestLongTermAccess = options.requestLongTermAccess.value_or(false);
+        margelo::nitro::node_fs::PickerMode mode = options.mode.value_or(margelo::nitro::node_fs::PickerMode::OPEN);
+        std::string modeStr = (mode == margelo::nitro::node_fs::PickerMode::IMPORT) ? "import" : "open";
+        
         jobjectArray extensionsArray = nullptr;
         if (options.extensions.has_value()) {
           auto extVec = options.extensions.value();
@@ -912,12 +916,14 @@ std::shared_ptr<Promise<std::vector<PickedFile>>> HybridFileSystem::pickFiles(co
 
         auto* ptr = new std::shared_ptr<Promise<std::vector<PickedFile>>>(promise);
         jlong promisePtr = reinterpret_cast<jlong>(ptr);
+        jstring jMode = env->NewStringUTF(modeStr.c_str());
 
-        env->CallStaticVoidMethod(cls, mid, multiple, extensionsArray, requestLongTermAccess, promisePtr);
+        env->CallStaticVoidMethod(cls, mid, multiple, extensionsArray, requestLongTermAccess, jMode, promisePtr);
 
         if (extensionsArray) {
           env->DeleteLocalRef(extensionsArray);
         }
+        env->DeleteLocalRef(jMode);
         env->DeleteLocalRef(cls);
         return promise;
       }
