@@ -1,8 +1,8 @@
 import { NitroFileSystem } from './native'
-import type { Stats as NitroStats, PickerOptions, PickedFile, PickedDirectory } from './specs/HybridFileSystem.nitro'
+import type { Stats as NitroStats, FilePickerOptions, DirectoryPickerOptions, PickedFile, PickedDirectory } from './specs/HybridFileSystem.nitro'
 import { Buffer } from 'react-native-nitro-buffer'
 
-export { PickerOptions, PickedFile, PickedDirectory }
+export { FilePickerOptions, DirectoryPickerOptions, PickedFile, PickedDirectory }
 
 // --- Constants ---
 export const constants = {
@@ -810,11 +810,11 @@ export function rename(oldPath: PathLike, newPath: PathLike, callback?: Callback
 
 // --- Picker APIs ---
 
-export async function pickFiles(options: PickerOptions = {}): Promise<PickedFile[]> {
+export async function pickFiles(options: FilePickerOptions = {}): Promise<PickedFile[]> {
     return NitroFileSystem.pickFiles(options);
 }
 
-export async function pickDirectory(options: PickerOptions = {}): Promise<PickedDirectory> {
+export async function pickDirectory(options: DirectoryPickerOptions = {}): Promise<PickedDirectory> {
     return NitroFileSystem.pickDirectory(options);
 }
 

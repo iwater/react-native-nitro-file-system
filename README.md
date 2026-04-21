@@ -182,13 +182,18 @@ const entries = await fs.promises.readdir(picked.bookmark ?? picked.path);
 console.log(entries);
 ```
 
-#### Pick Options
+#### File Pick Options
 | Option | Type | Description |
 | :--- | :--- | :--- |
-| `multiple` | `boolean` | Allow multiple file selection (Default: `false`). Only for `pickFiles`. |
+| `multiple` | `boolean` | Allow multiple file selection (Default: `false`). |
 | `mode` | `'open' \| 'import'` | **`'open'`**: Access file in-place (Original URI). <br> **`'import'`**: Copy file to app cache and return local path. (Default: `'open'`) |
-| `extensions` | `string[]` | Specific file extensions to filter (e.g., `['.pdf', '.docx']`). Only for `pickFiles`. |
+| `extensions` | `string[]` | Specific file extensions to filter (e.g., `['.pdf', '.docx']`). |
 | `requestLongTermAccess` | `boolean` | If `true`, Android will take persistable URI permission and iOS will return a `bookmark://` URI. Recommended for `'open'` mode. |
+
+#### Directory Pick Options
+| Option | Type | Description |
+| :--- | :--- | :--- |
+| `requestLongTermAccess` | `boolean` | If `true`, Android will take persistable URI permission and iOS will return a `bookmark://` URI. |
 
 #### Picked Result
 - `pickFiles` returns `Promise<PickedFile[]>`
@@ -197,6 +202,7 @@ console.log(entries);
 | Property | Type | Description |
 | :--- | :--- | :--- |
 | `path` | `string` | The physical path to the file or directory. |
+| `uri` | `string` | The standard URI (e.g. `file:///...` or `content://...`) for interoperability. |
 | `bookmark` | `string` | (Optional) The `bookmark://` (iOS) or `content://` (Android) URI for persistent access. |
 | `name` | `string` | The display name of the file (Only for `PickedFile`). |
 | `size` | `number` | The size of the file in bytes (Only for `PickedFile`). |

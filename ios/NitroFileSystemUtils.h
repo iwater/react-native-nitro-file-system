@@ -5,7 +5,7 @@
 
 #include "../nitrogen/generated/shared/c++/PickedFile.hpp"
 #include "../nitrogen/generated/shared/c++/PickedDirectory.hpp"
-#include "../nitrogen/generated/shared/c++/PickerOptions.hpp"
+#include "../nitrogen/generated/shared/c++/PickerMode.hpp"
 
 namespace nitro {
 namespace fs {

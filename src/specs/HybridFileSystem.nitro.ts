@@ -4,15 +4,20 @@ import { HybridFileWatcher } from './HybridFileWatcher.nitro'
 
 export type PickerMode = 'open' | 'import'
 
-export interface PickerOptions {
+export interface FilePickerOptions {
     multiple?: boolean;
     extensions?: string[];
     requestLongTermAccess?: boolean;
     mode?: PickerMode;
 }
 
+export interface DirectoryPickerOptions {
+    requestLongTermAccess?: boolean;
+}
+
 export interface PickedFile {
     path: string;
+    uri: string;
     name: string;
     size: number;
     type?: string;
@@ -38,11 +43,12 @@ export interface Stats {
 
 export interface PickedDirectory {
     path: string;
+    uri: string;
     bookmark?: string;
 }
 
 export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c++' }> {
-    // Core FS operations (Phase 1)
+    // Core FS operations
     open(path: string, flags: number, mode: number): number;
     close(fd: number): void;
     read(fd: number, buffer: ArrayBuffer, offset: number, length: number, position: number): number;
@@ -53,7 +59,7 @@ export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c
     ftruncate(fd: number, len: number): void;
     fsync(fd: number): void;
 
-    // Permissions & Timestamps (Phase 2)
+    // Permissions & Timestamps
     chmod(path: string, mode: number): void;
     fchmod(fd: number, mode: number): void;
     chown(path: string, uid: number, gid: number): void;
@@ -64,23 +70,21 @@ export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c
     lutimes(path: string, atime: number, mtime: number): void;
     futimes(fd: number, atime: number, mtime: number): void;
 
-    // Links (Phase 3)
+    // Links
     link(existingPath: string, newPath: string): void;
     symlink(target: string, path: string): void;
     readlink(path: string): string;
     realpath(path: string): string;
 
-    // Modern/Advanced (Phase 4)
+    // Modern/Advanced
     mkdtemp(prefix: string): string;
     rm(path: string, recursive: boolean): void;
 
-    // Modern/Advanced (Phase 5)
+    // Modern/Advanced
     opendir(path: string): HybridDirIterator;
     watch(path: string, onChange: (event: string, path: string) => void): HybridFileWatcher;
 
-    // Advanced FS operations (Phase 2)
-
-    // Advanced FS operations (Phase 2)
+    // Advanced FS operations
     stat(path: string): Stats;
     lstat(path: string): Stats;
     fstat(fd: number): Stats;
@@ -96,16 +100,17 @@ export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c
     readFile(path: string): ArrayBuffer;
     writeFile(path: string, buffer: ArrayBuffer): void;
 
+    // Persistence
     getBookmark(path: string): string;
     resolveBookmark(bookmark: string): string;
     getTempPath(): string;
 
-    // Vector I/O (Phase 7)
+    // Vector I/O
     readv(fd: number, buffers: ArrayBuffer[], position: number): number;
     writev(fd: number, buffers: ArrayBuffer[], position: number): number;
 
     // Picker API
-    pickFiles(options: PickerOptions): Promise<PickedFile[]>;
-    pickDirectory(options?: PickerOptions): Promise<PickedDirectory>;
+    pickFiles(options: FilePickerOptions): Promise<PickedFile[]>;
+    pickDirectory(options?: DirectoryPickerOptions): Promise<PickedDirectory>;
 }
 

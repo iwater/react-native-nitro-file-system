@@ -7,13 +7,13 @@
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <objc/runtime.h>
-#import "../nitrogen/generated/shared/c++/PickerOptions.hpp"
+
 #import "../nitrogen/generated/shared/c++/PickedFile.hpp"
 #import "../nitrogen/generated/shared/c++/PickedDirectory.hpp"
 
 using margelo::nitro::node_fs::PickedFile;
 using margelo::nitro::node_fs::PickedDirectory;
-using margelo::nitro::node_fs::PickerOptions;
+
 
 static char kNitroFSPickerDelegateKey;
 
@@ -63,6 +63,7 @@ static std::string toBookmarkUri(NSData *bookmarkData) {
     if (urls.count > 0) {
       PickedDirectory dir;
       dir.path = std::string(urls[0].path.UTF8String ? urls[0].path.UTF8String : "");
+      dir.uri = std::string(urls[0].absoluteString.UTF8String ? urls[0].absoluteString.UTF8String : "");
       NSLog(@"[NitroFS] 📂 Picker picked directory: %@", urls[0].path);
       NSLog(@"[NitroFS] 🏷️ requestLongTermAccess: %d", self.requestLongTermAccess);
       
@@ -97,6 +98,7 @@ static std::string toBookmarkUri(NSData *bookmarkData) {
     for (NSURL *url in urls) {
       PickedFile file;
       file.path = url.path.UTF8String ? url.path.UTF8String : "";
+      file.uri = std::string(url.absoluteString.UTF8String ? url.absoluteString.UTF8String : "");
       file.name = url.lastPathComponent.UTF8String ? url.lastPathComponent.UTF8String : "";
       
       if (self.requestLongTermAccess) {

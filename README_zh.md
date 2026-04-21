@@ -177,13 +177,18 @@ const entries = await fs.promises.readdir(picked.bookmark ?? picked.path);
 console.log(entries);
 ```
 
-#### 选择器选项 (Pick Options)
+#### 文件选择器选项 (File Pick Options)
 | 选项 | 类型 | 描述 |
 | :--- | :--- | :--- |
-| `multiple` | `boolean` | 是否允许选择多个文件 (默认为 `false`)。仅适用于 `pickFiles`。 |
+| `multiple` | `boolean` | 是否允许选择多个文件 (默认为 `false`)。 |
 | `mode` | `'open' \| 'import'` | **`'open'`**：原位访问 (原始 URI)。<br> **`'import'`**：将文件复制到应用缓存并返回本地路径。(默认：`'open'`) |
-| `extensions` | `string[]` | 过滤特定的文件后缀 (例如 `['.pdf', '.docx']`)。仅适用于 `pickFiles`。 |
+| `extensions` | `string[]` | 过滤特定的文件后缀 (例如 `['.pdf', '.docx']`)。 |
 | `requestLongTermAccess` | `boolean` | 若为 `true`，Android 会自动获取持久化 URI 权限，iOS 则会返回 `bookmark://` URI。推荐在 `'open'` 模式下开启。 |
+
+#### 目录选择器选项 (Directory Pick Options)
+| 选项 | 类型 | 描述 |
+| :--- | :--- | :--- |
+| `requestLongTermAccess` | `boolean` | 若为 `true`，Android 会自动获取持久化 URI 权限，iOS 则会返回 `bookmark://` URI。 |
 
 #### 返回结果说明 (Picked Result)
 - `pickFiles` 返回 `Promise<PickedFile[]>`
@@ -192,6 +197,7 @@ console.log(entries);
 | 属性 | 类型 | 描述 |
 | :--- | :--- | :--- |
 | `path` | `string` | 文件或目录的物理路径。 |
+| `uri` | `string` | 标准 URI (如 `file:///...` 或 `content://...`)，方便与其他库互操作。 |
 | `bookmark` | `string` | (可选) 用于持久访问的 `bookmark://` (iOS) 或 `content://` (Android) URI。 |
 | `name` | `string` | 文件显示名称 (仅限 `PickedFile`)。 |
 | `size` | `number` | 文件大小，单位字节 (仅限 `PickedFile`)。 |

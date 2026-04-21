@@ -185,6 +185,7 @@ public class NitroFileSystemUtils {
 
     public static class PickerResult {
         public String path;
+        public String uri;
         public String name;
         public double size;
         public String type;
@@ -193,6 +194,7 @@ public class NitroFileSystemUtils {
 
     public static class PickedDirectory {
         public String path;
+        public String uri;
         public String bookmark;
     }
 
@@ -257,6 +259,7 @@ public class NitroFileSystemUtils {
                 if (promisePtr != 0) {
                     PickedDirectory pickedDir = new PickedDirectory();
                     pickedDir.path = uri.toString();
+                    pickedDir.uri = uri.toString();
                     pickedDir.bookmark = uri.toString();
                     nativeOnDirPicked(promisePtr, pickedDir);
                 }
@@ -285,6 +288,7 @@ public class NitroFileSystemUtils {
                 
                 if (copyContentUri(uri.toString(), destFile.getAbsolutePath())) {
                     res.path = destFile.getAbsolutePath();
+                    res.uri = Uri.fromFile(destFile).toString();
                     res.bookmark = ""; // No bookmark needed for local file
                 }
             } catch (Exception e) {
@@ -342,6 +346,7 @@ public class NitroFileSystemUtils {
     private static PickerResult parseUri(Uri uri) {
         PickerResult res = new PickerResult();
         res.path = uri.toString();
+        res.uri = uri.toString();
         res.name = "";
         res.size = 0.0;
         res.type = "";

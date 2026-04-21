@@ -873,7 +873,7 @@ double HybridFileSystem::writev(
   return static_cast<double>(result);
 }
 
-std::shared_ptr<Promise<std::vector<PickedFile>>> HybridFileSystem::pickFiles(const PickerOptions& options) {
+std::shared_ptr<Promise<std::vector<PickedFile>>> HybridFileSystem::pickFiles(const FilePickerOptions& options) {
   auto promise = Promise<std::vector<PickedFile>>::create();
 #ifdef __APPLE__
   bool multiple = options.multiple.value_or(false);
@@ -936,7 +936,7 @@ std::shared_ptr<Promise<std::vector<PickedFile>>> HybridFileSystem::pickFiles(co
   return promise;
 }
 
-std::shared_ptr<Promise<PickedDirectory>> HybridFileSystem::pickDirectory(const std::optional<PickerOptions>& options) {
+std::shared_ptr<Promise<PickedDirectory>> HybridFileSystem::pickDirectory(const std::optional<DirectoryPickerOptions>& options) {
   auto promise = Promise<PickedDirectory>::create();
 #ifdef __APPLE__
   bool requestLongTermAccess = options.has_value() && options->requestLongTermAccess.has_value() ? options->requestLongTermAccess.value() : false;
@@ -984,6 +984,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_node_1fs_NitroFileSyste
   if (results != nullptr) {
     jclass resultCls = env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils$PickerResult");
     jfieldID pathField = env->GetFieldID(resultCls, "path", "Ljava/lang/String;");
+    jfieldID uriField = env->GetFieldID(resultCls, "uri", "Ljava/lang/String;");
     jfieldID nameField = env->GetFieldID(resultCls, "name", "Ljava/lang/String;");
     jfieldID sizeField = env->GetFieldID(resultCls, "size", "D");
     jfieldID typeField = env->GetFieldID(resultCls, "type", "Ljava/lang/String;");
@@ -995,12 +996,25 @@ extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_node_1fs_NitroFileSyste
       if (resObj) {
         PickedFile file;
         jstring jPath = (jstring)env->GetObjectField(resObj, pathField);
-        file.path = jPath ? env->GetStringUTFChars(jPath, nullptr) : "";
-        if (jPath) env->ReleaseStringUTFChars(jPath, file.path.c_str());
+        if (jPath) {
+          const char* str = env->GetStringUTFChars(jPath, nullptr);
+          file.path = std::string(str);
+          env->ReleaseStringUTFChars(jPath, str);
+        }
+
+        jstring jUri = (jstring)env->GetObjectField(resObj, uriField);
+        if (jUri) {
+          const char* str = env->GetStringUTFChars(jUri, nullptr);
+          file.uri = std::string(str);
+          env->ReleaseStringUTFChars(jUri, str);
+        }
 
         jstring jName = (jstring)env->GetObjectField(resObj, nameField);
-        file.name = jName ? env->GetStringUTFChars(jName, nullptr) : "";
-        if (jName) env->ReleaseStringUTFChars(jName, file.name.c_str());
+        if (jName) {
+          const char* str = env->GetStringUTFChars(jName, nullptr);
+          file.name = std::string(str);
+          env->ReleaseStringUTFChars(jName, str);
+        }
 
         file.size = env->GetDoubleField(resObj, sizeField);
 
@@ -1050,11 +1064,22 @@ extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_node_1fs_NitroFileSyste
   if (result) {
     jclass cls = env->GetObjectClass(result);
     jfieldID pathField = env->GetFieldID(cls, "path", "Ljava/lang/String;");
+    jfieldID uriField = env->GetFieldID(cls, "uri", "Ljava/lang/String;");
     jfieldID bookmarkField = env->GetFieldID(cls, "bookmark", "Ljava/lang/String;");
 
     jstring jPath = (jstring)env->GetObjectField(result, pathField);
-    dir.path = jPath ? env->GetStringUTFChars(jPath, nullptr) : "";
-    if (jPath) env->ReleaseStringUTFChars(jPath, dir.path.c_str());
+    if (jPath) {
+      const char* str = env->GetStringUTFChars(jPath, nullptr);
+      dir.path = std::string(str);
+      env->ReleaseStringUTFChars(jPath, str);
+    }
+
+    jstring jUri = (jstring)env->GetObjectField(result, uriField);
+    if (jUri) {
+      const char* str = env->GetStringUTFChars(jUri, nullptr);
+      dir.uri = std::string(str);
+      env->ReleaseStringUTFChars(jUri, str);
+    }
 
     jstring jBookmark = (jstring)env->GetObjectField(result, bookmarkField);
     if (jBookmark) {
