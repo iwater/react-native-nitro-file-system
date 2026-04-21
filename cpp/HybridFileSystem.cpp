@@ -1382,7 +1382,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_node_1fs_NitroFileSyste
 #ifdef __ANDROID__
 void HybridFileSystem::copyAssetRecursive(const std::string& assetPath, const std::string& destPath, bool recursive, bool force) {
   Stats s = statAsset(assetPath);
-  if (s.mode & S_IFDIR) {
+  if (static_cast<int>(s.mode) & S_IFDIR) {
     if (!recursive) {
       throw std::runtime_error("EISDIR: illegal operation on a directory, copy asset://" + assetPath);
     }

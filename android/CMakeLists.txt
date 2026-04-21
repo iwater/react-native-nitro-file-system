@@ -26,6 +26,7 @@ target_link_directories(${PACKAGE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libs
 target_link_libraries(${PACKAGE_NAME} 
     rn_file_system
     log
+    android
 )
 
 # Android 15 16KB page size alignment
