@@ -37,7 +37,7 @@ yarn add react-native-nitro-file-system react-native-nitro-modules react-native-
 | :--- | :--- | :--- |
 | **文件 I/O** | ✅ 100% | `open`, `read`, `write`, `close`, `readFile`, `writeFile`, `appendFile`, `truncate`, `fsync`, `readv`, `writev` |
 | **元数据** | ✅ 100% | `stat`, `lstat`, `fstat`, `access`, `utimes`, `futimes`, `lutimes` (支持 `bigint`) |
-| **目录操作** | ✅ 100% | `mkdir`, `rmdir`, `readdir`, `rm`, `mkdtemp`, `opendir` (`Dir` 类) |
+| **目录操作** | ✅ 100% | `mkdir`, `rmdir`, `readdir`, `rm`, `mkdtemp`, `opendir` (`Dir` 类), `cp` |
 | **权限管理** | ✅ 100% | `chmod`, `fchmod`, `lchmod`, `chown`, `fchown`, `lchown` |
 | **链接** | ✅ 100% | `link`, `symlink`, `readlink`, `realpath` |
 | **文件监听** | ✅ 100% | `watch`, `watchFile`, `unwatchFile` |
@@ -92,6 +92,32 @@ fs.readFile('/path/to/file.txt', 'utf8', (err, data) => {
 
 // 使用 Promise
 const content = await fs.promises.readFile('/path/to/file.txt', 'utf8');
+
+### 递归复制 (cp / cpSync)
+
+本库支持高性能的递归目录复制，行为与 Node.js 的 `fs.cp` 一致。
+
+```typescript
+import fs from 'react-native-nitro-file-system';
+
+// 同步递归复制
+fs.cpSync('/path/to/src', '/path/to/dest', { recursive: true, force: true });
+
+// 异步递归复制 (Promise)
+await fs.promises.cp('/path/to/src', '/path/to/dest', { recursive: true });
+
+#### `CpOptions` 参数说明
+
+| 选项 | 类型 | 默认值 | 描述 | 支持状态 |
+| :--- | :--- | :--- | :--- | :--- |
+| `recursive` | `boolean` | `false` | 是否递归复制目录。 | ✅ |
+| `force` | `boolean` | `true` | 是否覆盖已存在的文件。 | ✅ |
+| `dereference`| `boolean` | `false` | 是否解引用符号链接（复制实际文件）。 | ✅ |
+| `errorOnExist`| `boolean` | `false` | 当 `force` 为 false 且目标已存在时抛出错误。 | ✅ |
+| `preserveTimestamps` | `boolean` | `false` | 是否保留源文件的修改时间与访问时间。 | ✅ |
+| `filter` | `Function`| `undefined` | 过滤函数（因性能考虑暂不支持）。 | ❌ |
+| `mode` | `number` | `0` | 复制操作的修饰符。 | ❌ |
+```
 ```
 
 ### URL 路径协议支持
@@ -146,10 +172,14 @@ console.log(stats.size);
 
 - **仅限读取**：由于 APK assets 是只读打包的，因此仅支持读取类操作。
 - **路径格式**：使用 `asset://` 后接相对于项目 `src/main/assets` 目录的路径。
-- **copyFile 支持**：支持在 `fs.copyFile` 和 `fs.copyFileSync` 中将 `asset://` 作为**源路径**（source），方便将内置资源释放到可写目录。
+- **目录支持**：支持通过 `fs.readdir` 列出资产目录，或使用 `fs.cp` **递归复制**整个资产目录。
+- **copyFile 支持**：支持在 `fs.cp` 和 `fs.copyFile` 中将 `asset://` 作为**源路径**（source），方便将内置资源释放到可写目录。
 
 ```typescript
 import fs from 'react-native-nitro-file-system';
+
+// 递归复制内置资产目录到文档目录
+fs.cpSync('asset://web-bundle/ruffle', `${Paths.document}/ruffle`, { recursive: true });
 
 // 将内置数据库拷贝到文档目录
 fs.copyFileSync('asset://data/db.sqlite', `${Paths.document}/app.db`);

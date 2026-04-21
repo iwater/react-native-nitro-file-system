@@ -730,7 +730,34 @@ void HybridFileSystem::copyFile(const std::string &rawSrc, const std::string &ra
 #endif
   if (rn_fs_copy_file(src.c_str(), dest.c_str(), static_cast<int>(flags)) !=
       0) {
-    throw std::runtime_error("copyFile failed");
+    throw std::runtime_error("copyFile failed: " + src + " -> " + dest);
+  }
+}
+
+void HybridFileSystem::cp(const std::string &rawSrc, const std::string &rawDest,
+                          bool recursive, bool force, bool dereference,
+                          bool errorOnExist, bool preserveTimestamps) {
+  std::string src = normalizePath(rawSrc);
+  std::string dest = normalizePath(rawDest);
+
+#ifdef __ANDROID__
+  if (isAssetPath(src)) {
+    copyAssetRecursive(getAssetPath(src), dest, recursive, force);
+    return;
+  }
+#endif
+
+  int result = rn_fs_cp(src.c_str(), dest.c_str(), recursive, force,
+                        dereference, errorOnExist, preserveTimestamps);
+  if (result != 0) {
+    if (result == -2) {
+      throw std::runtime_error("Source does not exist: " + src);
+    } else if (result == -3) {
+      throw std::runtime_error("Destination already exists: " + dest);
+    } else if (result == -4) {
+      throw std::runtime_error("Source is a directory, use recursive: true");
+    }
+    throw std::runtime_error("cp failed: " + src + " -> " + dest);
   }
 }
 
@@ -1349,6 +1376,30 @@ extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_node_1fs_NitroFileSyste
 
   std::string error = errorStr ? env->GetStringUTFChars(errorStr, nullptr) : "Unknown error";
   promise->reject(std::make_exception_ptr(std::runtime_error(error)));
+}
+#endif
+
+#ifdef __ANDROID__
+void HybridFileSystem::copyAssetRecursive(const std::string& assetPath, const std::string& destPath, bool recursive, bool force) {
+  Stats s = statAsset(assetPath);
+  if (s.mode & S_IFDIR) {
+    if (!recursive) {
+      throw std::runtime_error("EISDIR: illegal operation on a directory, copy asset://" + assetPath);
+    }
+    this->mkdir(destPath, 0755, true);
+    
+    std::vector<std::string> entries = readdirAsset(assetPath);
+    for (const auto& entry : entries) {
+      std::string subAsset = assetPath.empty() ? entry : assetPath + "/" + entry;
+      std::string subDest = destPath;
+      if (subDest.back() != '/') subDest += "/";
+      subDest += entry;
+      copyAssetRecursive(subAsset, subDest, recursive, force);
+    }
+  } else {
+    auto buffer = readAssetBuffer(assetPath);
+    this->writeFile(destPath, buffer);
+  }
 }
 #endif
 

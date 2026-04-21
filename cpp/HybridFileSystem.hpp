@@ -77,6 +77,9 @@ public:
   void rename(const std::string &oldPath, const std::string &newPath) override;
   void copyFile(const std::string &src, const std::string &dest,
                 double flags) override;
+  void cp(const std::string &src, const std::string &dest, bool recursive,
+          bool force, bool dereference, bool errorOnExist,
+          bool preserveTimestamps) override;
 
   std::shared_ptr<HybridHybridDirIteratorSpec>
   opendir(const std::string &path) override;
@@ -107,6 +110,9 @@ public:
 
 private:
   std::string normalizePath(const std::string &path);
+#ifdef __ANDROID__
+  void copyAssetRecursive(const std::string& assetPath, const std::string& destPath, bool recursive, bool force);
+#endif
 };
 
 } // namespace margelo::nitro::node_fs

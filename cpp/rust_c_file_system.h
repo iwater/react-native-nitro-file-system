@@ -77,6 +77,14 @@ int rn_fs_rename(const char *old_path, const char *new_path);
 
 int rn_fs_copy_file(const char *src, const char *dest, int _flags);
 
+int rn_fs_cp(const char *src,
+             const char *dest,
+             bool recursive,
+             bool force,
+             bool dereference,
+             bool error_on_exist,
+             bool preserve_timestamps);
+
 int rn_fs_link(const char *existing, const char *new_path);
 
 int rn_fs_symlink(const char *target, const char *path);

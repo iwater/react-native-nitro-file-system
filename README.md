@@ -42,7 +42,7 @@ yarn add react-native-nitro-file-system react-native-nitro-modules react-native-
 | :--- | :--- | :--- |
 | **File I/O** | ✅ 100% | `open`, `read`, `write`, `close`, `readFile`, `writeFile`, `appendFile`, `truncate`, `fsync`, `readv`, `writev` |
 | **Metadata** | ✅ 100% | `stat`, `lstat`, `fstat`, `access`, `utimes`, `futimes`, `lutimes` (including `bigint` support) |
-| **Directories** | ✅ 100% | `mkdir`, `rmdir`, `readdir`, `rm`, `mkdtemp`, `opendir` (`Dir` class) |
+| **Directories** | ✅ 100% | `mkdir`, `rmdir`, `readdir`, `rm`, `mkdtemp`, `opendir` (`Dir` class), `cp` |
 | **Permissions** | ✅ 100% | `chmod`, `fchmod`, `lchmod`, `chown`, `fchown`, `lchown` |
 | **Links** | ✅ 100% | `link`, `symlink`, `readlink`, `realpath` |
 | **Watching** | ✅ 100% | `watch`, `watchFile`, `unwatchFile` |
@@ -97,6 +97,32 @@ fs.readFile('/path/to/file.txt', 'utf8', (err, data) => {
 
 // Using Promises
 const content = await fs.promises.readFile('/path/to/file.txt', 'utf8');
+
+### Recursive Copying (cp / cpSync)
+
+The library supports high-performance recursive directory copying, matching the behavior of Node.js `fs.cp`.
+
+```typescript
+import fs from 'react-native-nitro-file-system';
+
+// Sync recursive copy
+fs.cpSync('/path/to/src', '/path/to/dest', { recursive: true, force: true });
+
+// Async recursive copy
+await fs.promises.cp('/path/to/src', '/path/to/dest', { recursive: true });
+
+#### `CpOptions`
+
+| Option | Type | Default | Description | Supported |
+| :--- | :--- | :--- | :--- | :--- |
+| `recursive` | `boolean` | `false` | Copy directories recursively. | ✅ |
+| `force` | `boolean` | `true` | Overwrite existing files. | ✅ |
+| `dereference`| `boolean` | `false` | Dereference symlinks. | ✅ |
+| `errorOnExist`| `boolean` | `false` | Throw error if destination exists and `force` is false. | ✅ |
+| `preserveTimestamps` | `boolean` | `false` | Preserve mtime and atime from source. | ✅ |
+| `filter` | `Function`| `undefined` | Filter function for files/directories. | ❌ |
+| `mode` | `number` | `0` | Modifiers for copy operation. | ❌ |
+```
 ```
 
 ### URL-style Path Support
@@ -151,12 +177,16 @@ The library provides direct, high-performance access to Android's `assets` direc
 
 - **Read-Only**: Since APK assets are packaged as read-only, only read-related operations are supported.
 - **Path format**: Use `asset://` followed by the relative path within your project's `src/main/assets` directory.
-- **copyFile Support**: You can use `asset://` as the **source** path in `fs.copyFile` and `fs.copyFileSync` to extract assets to other directories.
+- **Directory Support**: You can list files in an asset directory using `fs.readdir` or **recursively copy** an entire asset directory using `fs.cp`.
+- **copyFile Support**: You can use `asset://` as the **source** path in `fs.cp` and `fs.copyFile` to extract assets to other directories.
 
 ```typescript
 import fs from 'react-native-nitro-file-system';
 
-// Copy an asset to the documents directory
+// Recursive copy a bundled asset directory to documents
+fs.cpSync('asset://web-bundle/ruffle', `${Paths.document}/ruffle`, { recursive: true });
+
+// Copy an asset file to the documents directory
 fs.copyFileSync('asset://data/db.sqlite', `${Paths.document}/app.db`);
 
 // Read a bundled configuration file

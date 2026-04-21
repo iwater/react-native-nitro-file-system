@@ -81,6 +81,14 @@ export interface RmOptions {
     retryDelay?: number;
 }
 
+export interface CpOptions {
+    recursive?: boolean;
+    force?: boolean;
+    errorOnExist?: boolean;
+    dereference?: boolean;
+    preserveTimestamps?: boolean;
+}
+
 export interface RmdirOptions {
     maxRetries?: number;
     recursive?: boolean;
@@ -850,6 +858,34 @@ export function copyFile(src: PathLike, dest: PathLike, flags: number | Callback
     setImmediate(() => {
         try {
             copyFileSync(normalizedSrc, normalizedDest, f);
+            callback?.(null);
+        } catch (e: any) {
+            callback?.(e);
+        }
+    });
+}
+
+export function cpSync(src: PathLike, dest: PathLike, options?: CpOptions): void {
+    const normalizedSrc = normalizePath(src);
+    const normalizedDest = normalizePath(dest);
+    const recursive = options?.recursive || false;
+    const force = options?.force !== undefined ? options.force : true;
+    const dereference = options?.dereference || false;
+    const errorOnExist = options?.errorOnExist || false;
+    const preserveTimestamps = options?.preserveTimestamps || false;
+    NitroFileSystem.cp(normalizedSrc, normalizedDest, recursive, force, dereference, errorOnExist, preserveTimestamps);
+}
+
+export function cp(src: PathLike, dest: PathLike, options?: CpOptions | Callback, callback?: Callback): void {
+    if (typeof options === 'function') {
+        callback = options;
+        options = undefined;
+    }
+    const normalizedSrc = normalizePath(src);
+    const normalizedDest = normalizePath(dest);
+    setImmediate(() => {
+        try {
+            cpSync(normalizedSrc, normalizedDest, options as CpOptions);
             callback?.(null);
         } catch (e: any) {
             callback?.(e);
@@ -1667,6 +1703,14 @@ export const promises = {
             });
         });
     },
+    cp: async (src: PathLike, dest: PathLike, options?: CpOptions): Promise<void> => {
+        return new Promise((resolve, reject) => {
+            cp(src, dest, options as any, (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    },
     link: async (existingPath: PathLike, newPath: PathLike): Promise<void> => {
         return new Promise((resolve, reject) => {
             link(existingPath, newPath, (err) => {
@@ -2084,6 +2128,8 @@ export default {
     closeSync,
     copyFile,
     copyFileSync,
+    cp,
+    cpSync,
     exists,
     existsSync,
     fchmod,

@@ -96,6 +96,7 @@ export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c
     unlink(path: string): void;
     rename(oldPath: string, newPath: string): void;
     copyFile(src: string, dest: string, flags: number): void;
+    cp(src: string, dest: string, recursive: boolean, force: boolean, dereference: boolean, errorOnExist: boolean, preserveTimestamps: boolean): void;
 
     readFile(path: string): ArrayBuffer;
     writeFile(path: string, buffer: ArrayBuffer): void;
