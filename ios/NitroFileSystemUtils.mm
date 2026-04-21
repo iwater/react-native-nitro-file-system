@@ -217,10 +217,16 @@ int openBookmark(const std::string &uri, int flags, int mode) {
       if (!rootUrl) return -1;
       
       BOOL success = [rootUrl startAccessingSecurityScopedResource];
+      if (!success) {
+        NSLog(@"[NitroFS] ⚠️ startAccessingSecurityScopedResource returned NO for root: %@", rootUrl.path);
+      }
       NSString *nsSubPath = [[NSString stringWithUTF8String:subPathPart.c_str()] stringByRemovingPercentEncoding];
       NSURL *fileUrl = [rootUrl URLByAppendingPathComponent:nsSubPath];
       
       int fd = open(fileUrl.path.UTF8String, flags, mode);
+      if (fd < 0) {
+        NSLog(@"[NitroFS] ❌ openBookmark failed for path: %@, error: %s", fileUrl.path, strerror(errno));
+      }
       if (success) [rootUrl stopAccessingSecurityScopedResource];
       return fd;
     } else {
@@ -228,7 +234,13 @@ int openBookmark(const std::string &uri, int flags, int mode) {
       NSURL *url = resolveBookmark(all, "");
       if (!url) return -1;
       BOOL success = [url startAccessingSecurityScopedResource];
+      if (!success) {
+        NSLog(@"[NitroFS] ⚠️ startAccessingSecurityScopedResource returned NO for URL: %@", url.path);
+      }
       int fd = open(url.path.UTF8String, flags, mode);
+      if (fd < 0) {
+         NSLog(@"[NitroFS] ❌ openBookmark failed for path: %@, error: %s", url.path, strerror(errno));
+      }
       if (success) [url stopAccessingSecurityScopedResource];
       return fd;
     }

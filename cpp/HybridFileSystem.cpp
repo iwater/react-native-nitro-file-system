@@ -702,7 +702,7 @@ void HybridFileSystem::writeFile(const std::string &rawPath,
 #ifdef __ANDROID__
   if (path.find("content://") == 0) {
     // 1. Open (write mode)
-    double fd = this->open(path, O_WRONLY | O_CREAT | O_TRUNC, 0);
+    double fd = this->open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     // 2. Write
     int64_t r =
         rn_fs_write(static_cast<int>(fd), buffer->data(), buffer->size(), -1);
@@ -717,7 +717,7 @@ void HybridFileSystem::writeFile(const std::string &rawPath,
 #endif
 #ifdef __APPLE__
   if (path.find("bookmark://") == 0) {
-    auto fd = this->open(path, O_WRONLY | O_CREAT | O_TRUNC, 0);
+    auto fd = this->open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     int64_t r =
         rn_fs_write(static_cast<int>(fd), buffer->data(), buffer->size(), -1);
     this->close(fd);
