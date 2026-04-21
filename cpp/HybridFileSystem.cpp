@@ -2,10 +2,13 @@
 #include "HybridDirIterator.hpp"
 #include "HybridFileWatcher.hpp"
 #include "rust_c_file_system.h"
+#include <cstdio>
 #include <fcntl.h>
 #include <iostream>
 #include <string>
 #include <sys/stat.h>
+#include <stdexcept>
+#include <exception>
 
 #ifdef __ANDROID__
 #include <jni.h>
@@ -440,6 +443,55 @@ void HybridFileSystem::rmdir(const std::string &rawPath) {
 std::vector<std::string> HybridFileSystem::readdir(const std::string &rawPath) {
   std::string path = normalizePath(rawPath);
   std::vector<std::string> results;
+
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
+    bool success = false;
+    ::nitro::fs::withBookmarkPath(path, [&](const std::string &resolvedPath) {
+      DirIter *iter = rn_fs_readdir_open(resolvedPath.c_str());
+      if (iter) {
+        success = true;
+        char *name;
+        while ((name = rn_fs_readdir_next(iter)) != nullptr) {
+          results.push_back(std::string(name));
+          rn_fs_free_string(name);
+        }
+        rn_fs_readdir_close(iter);
+      }
+    });
+    if (success) {
+      return results;
+    }
+    throw std::runtime_error("readdir failed (open): " + path);
+  }
+#endif
+#ifdef __ANDROID__
+  if (path.find("content://") == 0) {
+    JNIEnv *env = getJNIEnv();
+    if (env) {
+      jclass cls = env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+      jmethodID mid = env->GetStaticMethodID(cls, "listContentUri", "(Ljava/lang/String;)[Ljava/lang/String;");
+      if (mid) {
+        jstring jUri = env->NewStringUTF(path.c_str());
+        jobjectArray jArr = (jobjectArray)env->CallStaticObjectMethod(cls, mid, jUri);
+        env->DeleteLocalRef(jUri);
+        if (jArr) {
+          int len = env->GetArrayLength(jArr);
+          for (int i = 0; i < len; i++) {
+            jstring js = (jstring)env->GetObjectArrayElement(jArr, i);
+            const char *str = env->GetStringUTFChars(js, nullptr);
+            results.push_back(std::string(str));
+            env->ReleaseStringUTFChars(js, str);
+            env->DeleteLocalRef(js);
+          }
+          env->DeleteLocalRef(jArr);
+          return results;
+        }
+      }
+    }
+  }
+#endif
+
   DirIter *iter = rn_fs_readdir_open(path.c_str());
   if (!iter) {
     throw std::runtime_error("readdir failed (open): " + path);
@@ -708,8 +760,26 @@ std::string HybridFileSystem::getTempPath() {
 std::shared_ptr<HybridHybridDirIteratorSpec>
 HybridFileSystem::opendir(const std::string &rawPath) {
   std::string path = normalizePath(rawPath);
+
+#ifdef __APPLE__
+  if (path.find("bookmark://") == 0) {
+    std::string resolvedPath;
+    void* token = ::nitro::fs::startAccessingBookmark(path, resolvedPath);
+    if (token) {
+        DirIter *iter = rn_fs_readdir_open(resolvedPath.c_str());
+        if (iter) {
+            return std::make_shared<HybridDirIterator>(iter, [token]() {
+                ::nitro::fs::stopAccessingBookmark(token);
+            });
+        }
+        ::nitro::fs::stopAccessingBookmark(token);
+    }
+    throw std::runtime_error("opendir failed (bookmark): " + path);
+  }
+#endif
+
   DirIter *iter = rn_fs_readdir_open(path.c_str());
-  if (iter == nullptr) {
+  if (!iter) {
     throw std::runtime_error("opendir failed: " + path);
   }
   return std::make_shared<HybridDirIterator>(iter);
@@ -802,5 +872,205 @@ double HybridFileSystem::writev(
 
   return static_cast<double>(result);
 }
+
+std::shared_ptr<Promise<std::vector<PickedFile>>> HybridFileSystem::pickFiles(const PickerOptions& options) {
+  auto promise = Promise<std::vector<PickedFile>>::create();
+#ifdef __APPLE__
+  bool multiple = options.multiple.has_value() ? options.multiple.value() : false;
+  bool requestLongTermAccess = options.requestLongTermAccess.has_value() ? options.requestLongTermAccess.value() : false;
+  std::vector<std::string> extensions = options.extensions.has_value() ? options.extensions.value() : std::vector<std::string>();
+
+  ::nitro::fs::pickFilesIOS(multiple, requestLongTermAccess, extensions, 
+    [promise](const std::vector<PickedFile>& files) {
+      promise->resolve(files);
+    },
+    [promise](const std::string& error) {
+      promise->reject(std::make_exception_ptr(std::runtime_error(error)));
+    }
+  );
+#elif defined(__ANDROID__)
+  JNIEnv *env = getJNIEnv();
+  if (env) {
+    jclass cls = env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+    if (cls) {
+      jmethodID mid = env->GetStaticMethodID(cls, "pickFiles", "(Z[Ljava/lang/String;ZJ)V");
+      if (mid) {
+        bool multiple = options.multiple.has_value() && options.multiple.value();
+        bool requestLongTermAccess = options.requestLongTermAccess.has_value() && options.requestLongTermAccess.value();
+        jobjectArray extensionsArray = nullptr;
+        if (options.extensions.has_value()) {
+          auto extVec = options.extensions.value();
+          jclass stringCls = env->FindClass("java/lang/String");
+          extensionsArray = env->NewObjectArray(extVec.size(), stringCls, nullptr);
+          for (size_t i = 0; i < extVec.size(); i++) {
+            jstring extStr = env->NewStringUTF(extVec[i].c_str());
+            env->SetObjectArrayElement(extensionsArray, i, extStr);
+            env->DeleteLocalRef(extStr);
+          }
+          env->DeleteLocalRef(stringCls);
+        }
+
+        auto* ptr = new std::shared_ptr<Promise<std::vector<PickedFile>>>(promise);
+        jlong promisePtr = reinterpret_cast<jlong>(ptr);
+
+        env->CallStaticVoidMethod(cls, mid, multiple, extensionsArray, requestLongTermAccess, promisePtr);
+
+        if (extensionsArray) {
+          env->DeleteLocalRef(extensionsArray);
+        }
+        env->DeleteLocalRef(cls);
+        return promise;
+      }
+    }
+  }
+  promise->reject(std::make_exception_ptr(std::runtime_error("Failed to call JNI pickFiles")));
+#else
+  promise->reject(std::make_exception_ptr(std::runtime_error("Not implemented on this platform")));
+#endif
+  return promise;
+}
+
+std::shared_ptr<Promise<PickedDirectory>> HybridFileSystem::pickDirectory(const std::optional<PickerOptions>& options) {
+  auto promise = Promise<PickedDirectory>::create();
+#ifdef __APPLE__
+  bool requestLongTermAccess = options.has_value() && options->requestLongTermAccess.has_value() ? options->requestLongTermAccess.value() : false;
+  ::nitro::fs::pickDirectoryIOS(requestLongTermAccess, 
+    [promise](const PickedDirectory& dir) {
+      promise->resolve(dir);
+    },
+    [promise](const std::string& error) {
+      promise->reject(std::make_exception_ptr(std::runtime_error(error)));
+    }
+  );
+#elif defined(__ANDROID__)
+  JNIEnv *env = getJNIEnv();
+  if (env) {
+    jclass cls = env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+    if (cls) {
+      jmethodID mid = env->GetStaticMethodID(cls, "pickDirectory", "(ZJ)V");
+      if (mid) {
+        bool requestLongTermAccess = options.has_value() && options->requestLongTermAccess.has_value() && options->requestLongTermAccess.value();
+        auto* ptr = new std::shared_ptr<Promise<PickedDirectory>>(promise);
+        jlong promisePtr = reinterpret_cast<jlong>(ptr);
+
+        env->CallStaticVoidMethod(cls, mid, requestLongTermAccess, promisePtr);
+        env->DeleteLocalRef(cls);
+        return promise;
+      }
+    }
+  }
+  promise->reject(std::make_exception_ptr(std::runtime_error("Failed to call JNI pickDirectory")));
+#else
+  promise->reject(std::make_exception_ptr(std::runtime_error("Not implemented on this platform")));
+#endif
+  return promise;
+}
+
+#ifdef __ANDROID__
+extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_node_1fs_NitroFileSystemUtils_nativeOnFilesPicked(
+    JNIEnv *env, jclass clazz, jlong promisePtr, jobjectArray results) {
+  auto ptr = reinterpret_cast<std::shared_ptr<Promise<std::vector<PickedFile>>>*>(promisePtr);
+  if (!ptr) return;
+  auto promise = *ptr;
+  delete ptr;
+
+  std::vector<PickedFile> files;
+  if (results != nullptr) {
+    jclass resultCls = env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils$PickerResult");
+    jfieldID pathField = env->GetFieldID(resultCls, "path", "Ljava/lang/String;");
+    jfieldID nameField = env->GetFieldID(resultCls, "name", "Ljava/lang/String;");
+    jfieldID sizeField = env->GetFieldID(resultCls, "size", "D");
+    jfieldID typeField = env->GetFieldID(resultCls, "type", "Ljava/lang/String;");
+    jfieldID bookmarkField = env->GetFieldID(resultCls, "bookmark", "Ljava/lang/String;");
+
+    jsize length = env->GetArrayLength(results);
+    for (jsize i = 0; i < length; i++) {
+      jobject resObj = env->GetObjectArrayElement(results, i);
+      if (resObj) {
+        PickedFile file;
+        jstring jPath = (jstring)env->GetObjectField(resObj, pathField);
+        file.path = jPath ? env->GetStringUTFChars(jPath, nullptr) : "";
+        if (jPath) env->ReleaseStringUTFChars(jPath, file.path.c_str());
+
+        jstring jName = (jstring)env->GetObjectField(resObj, nameField);
+        file.name = jName ? env->GetStringUTFChars(jName, nullptr) : "";
+        if (jName) env->ReleaseStringUTFChars(jName, file.name.c_str());
+
+        file.size = env->GetDoubleField(resObj, sizeField);
+
+        jstring jType = (jstring)env->GetObjectField(resObj, typeField);
+        if (jType) {
+          const char* typeCStr = env->GetStringUTFChars(jType, nullptr);
+          file.type = std::string(typeCStr);
+          env->ReleaseStringUTFChars(jType, typeCStr);
+        }
+
+        jstring jBookmark = (jstring)env->GetObjectField(resObj, bookmarkField);
+        if (jBookmark) {
+          const char* bookmarkCStr = env->GetStringUTFChars(jBookmark, nullptr);
+          file.bookmark = std::string(bookmarkCStr);
+          env->ReleaseStringUTFChars(jBookmark, bookmarkCStr);
+        }
+
+        files.push_back(file);
+        env->DeleteLocalRef(resObj);
+      }
+    }
+    env->DeleteLocalRef(resultCls);
+  }
+
+  promise->resolve(files);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_node_1fs_NitroFileSystemUtils_nativeOnFilesPickError(
+    JNIEnv *env, jclass clazz, jlong promisePtr, jstring errorStr) {
+  auto ptr = reinterpret_cast<std::shared_ptr<Promise<std::vector<PickedFile>>>*>(promisePtr);
+  if (!ptr) return;
+  auto promise = *ptr;
+  delete ptr;
+
+  std::string error = errorStr ? env->GetStringUTFChars(errorStr, nullptr) : "Unknown error";
+  promise->reject(std::make_exception_ptr(std::runtime_error(error)));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_node_1fs_NitroFileSystemUtils_nativeOnDirPicked(
+    JNIEnv *env, jclass clazz, jlong promisePtr, jobject result) {
+  auto ptr = reinterpret_cast<std::shared_ptr<Promise<PickedDirectory>>*>(promisePtr);
+  if (!ptr) return;
+  auto promise = *ptr;
+  delete ptr;
+
+  PickedDirectory dir;
+  if (result) {
+    jclass cls = env->GetObjectClass(result);
+    jfieldID pathField = env->GetFieldID(cls, "path", "Ljava/lang/String;");
+    jfieldID bookmarkField = env->GetFieldID(cls, "bookmark", "Ljava/lang/String;");
+
+    jstring jPath = (jstring)env->GetObjectField(result, pathField);
+    dir.path = jPath ? env->GetStringUTFChars(jPath, nullptr) : "";
+    if (jPath) env->ReleaseStringUTFChars(jPath, dir.path.c_str());
+
+    jstring jBookmark = (jstring)env->GetObjectField(result, bookmarkField);
+    if (jBookmark) {
+      const char* bookmarkCStr = env->GetStringUTFChars(jBookmark, nullptr);
+      dir.bookmark = std::string(bookmarkCStr);
+      env->ReleaseStringUTFChars(jBookmark, bookmarkCStr);
+    }
+  }
+
+  promise->resolve(dir);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_node_1fs_NitroFileSystemUtils_nativeOnDirPickError(
+    JNIEnv *env, jclass clazz, jlong promisePtr, jstring errorStr) {
+  auto ptr = reinterpret_cast<std::shared_ptr<Promise<PickedDirectory>>*>(promisePtr);
+  if (!ptr) return;
+  auto promise = *ptr;
+  delete ptr;
+
+  std::string error = errorStr ? env->GetStringUTFChars(errorStr, nullptr) : "Unknown error";
+  promise->reject(std::make_exception_ptr(std::runtime_error(error)));
+}
+#endif
 
 } // namespace margelo::nitro::node_fs

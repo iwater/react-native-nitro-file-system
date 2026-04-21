@@ -20,6 +20,10 @@ void HybridDirIterator::close() {
     rn_fs_readdir_close(_iter);
     _iter = nullptr;
   }
+  if (_cleanup) {
+    _cleanup();
+    _cleanup = nullptr;
+  }
 }
 
 } // namespace margelo::nitro::node_fs

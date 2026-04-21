@@ -87,6 +87,10 @@ public:
   std::string resolveBookmark(const std::string &bookmark) override;
   std::string getTempPath() override;
 
+  // Picker API
+  std::shared_ptr<Promise<std::vector<PickedFile>>> pickFiles(const PickerOptions& options) override;
+  std::shared_ptr<Promise<PickedDirectory>> pickDirectory(const std::optional<PickerOptions>& options) override;
+
 private:
   std::string normalizePath(const std::string &path);
 };

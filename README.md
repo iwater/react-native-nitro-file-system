@@ -14,7 +14,8 @@ A high-performance, Node.js-compatible file system (fs) module for React Native,
 - 🛠️ **Node.js Compatible API**: Supports `fs` methods like `readFile`, `writeFile`, `mkdir`, `stat`, and more (Sync & Async).
 - 🏗️ **Streaming Support**: Built-in `ReadStream` and `WriteStream` for efficient data processing.
 - 📂 **Directory & Watcher**: Support for directory iteration and file system watching.
-- 🌐 **URL Path Support**: Handle `file://` URIs and standard `URL` objects with automatic percent-encoding (e.g., `%20`) decoding.
+- 🌐 **URL Path Support**: Handle `file://`, `bookmark://` (iOS), and `content://` (Android) URIs.
+- 🔓 **Native Picker**: Built-in cross-platform file and directory picker with persistent access support.
 
 
 ## Comparison with other Libraries
@@ -46,6 +47,7 @@ yarn add react-native-nitro-file-system react-native-nitro-modules react-native-
 | **Links** | ✅ 100% | `link`, `symlink`, `readlink`, `realpath` |
 | **Watching** | ✅ 100% | `watch`, `watchFile`, `unwatchFile` |
 | **Streams** | ✅ 100% | `createReadStream`, `createWriteStream` |
+| **Native Picker**| ✅ 100% | `pickFiles`, `pickDirectory` |
 | **Promises** | ✅ 100% | `fs.promises.*` (Full coverage) |
 
 ## Basic Usage
@@ -132,6 +134,110 @@ const content = await fs.promises.readFile(bookmark);
 const path = resolveBookmark(bookmark);
 console.log(path); // "/path/to/file"
 ```
+
+### Native File Picker
+
+Nitro File System includes a high-performance native file and directory picker that integrates seamlessly with the library's path system.
+
+```typescript
+import fs, { pickFiles, pickDirectory } from 'react-native-nitro-file-system';
+
+// 1. Pick multiple images
+const files = await pickFiles({
+  multiple: true,
+  extensions: ['.jpg', '.png'],
+  requestLongTermAccess: true // Get persistent access
+});
+
+for (const file of files) {
+  console.log(`Picked: ${file.name} at ${file.path}`);
+  if (file.bookmark) {
+    console.log(`Persistent bookmark: ${file.bookmark}`);
+  }
+  // Read the file directly using its path
+  const data = await fs.promises.readFile(file.path);
+}
+
+// 2. Pick a directory
+const picked = await pickDirectory({
+  requestLongTermAccess: true
+});
+console.log(`Selected directory: ${picked.path}`);
+if (picked.bookmark) {
+  console.log(`Persistent bookmark: ${picked.bookmark}`);
+}
+
+// List files in the picked directory (works with path or bookmark)
+const entries = await fs.promises.readdir(picked.bookmark ?? picked.path);
+console.log(entries);
+```
+
+#### Pick Options
+| Option | Type | Description |
+| :--- | :--- | :--- |
+| `multiple` | `boolean` | Allow multiple file selection (Default: `false`). Only for `pickFiles`. |
+| `extensions` | `string[]` | Specific file extensions to filter (e.g., `['.pdf', '.docx']`). Only for `pickFiles`. |
+| `requestLongTermAccess` | `boolean` | If `true`, Android will take persistable URI permission and iOS will return a `bookmark://` URI. |
+
+#### Picked Result
+- `pickFiles` returns `Promise<PickedFile[]>`
+- `pickDirectory` returns `Promise<PickedDirectory>`
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `path` | `string` | The physical path to the file or directory. |
+| `bookmark` | `string` | (Optional) The `bookmark://` (iOS) or `content://` (Android) URI for persistent access. |
+| `name` | `string` | The display name of the file (Only for `PickedFile`). |
+| `size` | `number` | The size of the file in bytes (Only for `PickedFile`). |
+
+#### Platform Specifics
+- **Android**: Returns `content://` URIs in both `path` and `bookmark`. If `requestLongTermAccess` is enabled, the library automatically calls `takePersistableUriPermission` for you.
+- **iOS**: Returns standard file paths in `path`. If `requestLongTermAccess` is enabled, it returns `bookmark://` URIs in `bookmark` which provide security-scoped access. These URIs are natively supported by all other `fs` methods in this library.
+
+
+
+## Native Picker & Persistent Access
+
+On iOS and Android, accessing files outside of the application's sandbox (like external storage or specific folders) requires explicit user permission. The library provides a native picker and a way to maintain persistent access through security-scoped bookmarks (iOS) or persistable URI permissions (Android).
+
+### Picking Files and Directories
+
+```typescript
+import fs from 'react-native-nitro-file-system';
+
+// Pick files (returns PickedFile[])
+const files = await fs.pickFiles({
+  multiple: true,
+  extensions: ['.txt', '.pdf'],
+  requestLongTermAccess: true    // Recommended for persistent access
+});
+
+// Pick a directory (returns PickedDirectory)
+const picked = await fs.pickDirectory({
+  requestLongTermAccess: true
+});
+console.log(picked.path);     // Physical path
+console.log(picked.bookmark); // bookmark://... on iOS, content://... on Android
+
+// You can use the returned bookmark directly with any fs method
+const items = fs.readdirSync(picked.bookmark ?? picked.path);
+```
+
+### iOS Security Scoped Bookmarks
+
+When `requestLongTermAccess: true` is passed to `pickFiles` or when using `pickDirectory`, the library returns a special `bookmark://` URI on iOS. This URI embeds a security-scoped bookmark.
+
+- **Seamless Access**: The library automatically manages security-scoped resource access for every `fs` call using a `bookmark://` URI.
+- **Path Joining**: You can join paths with a bookmark URI (e.g., using `${uri}/file.txt`), and the library will correctly resolve the path while maintaining security scoping.
+- **Long-term Storage**: These URIs can be saved (e.g., in MMKV) and reused across app restarts.
+- **Manual Bookmarks**: Use `fs.getBookmark(path)` to generate a bookmark for an existing file or directory.
+
+### Android Persistable URIs
+
+On Android, `pickFiles` and `pickDirectory` return `content://` URIs. The library automatically requests persistable URI permissions when possible, ensuring the app maintains access after reboot.
+
+- **Compatibility**: The Node.js-compatible API handles `content://` URIs for reading, writing, and directory listing.
+- **SAF Tree Support**: `readdir` and `stat` are supported for directory tree URIs returned by `pickDirectory`.
 
 ## License
 

@@ -2,6 +2,20 @@ import { HybridObject, NitroModules } from 'react-native-nitro-modules'
 import { HybridDirIterator } from './HybridDirIterator.nitro'
 import { HybridFileWatcher } from './HybridFileWatcher.nitro'
 
+export interface PickerOptions {
+    multiple?: boolean;
+    extensions?: string[];
+    requestLongTermAccess?: boolean;
+}
+
+export interface PickedFile {
+    path: string;
+    name: string;
+    size: number;
+    type?: string;
+    bookmark?: string;
+}
+
 export interface Stats {
     dev: number;
     ino: number;
@@ -17,6 +31,11 @@ export interface Stats {
     mtimeMs: number;
     ctimeMs: number;
     birthtimeMs: number;
+}
+
+export interface PickedDirectory {
+    path: string;
+    bookmark?: string;
 }
 
 export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c++' }> {
@@ -82,5 +101,8 @@ export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c
     readv(fd: number, buffers: ArrayBuffer[], position: number): number;
     writev(fd: number, buffers: ArrayBuffer[], position: number): number;
 
-    // Future methods will be added here
+    // Picker API
+    pickFiles(options: PickerOptions): Promise<PickedFile[]>;
+    pickDirectory(options?: PickerOptions): Promise<PickedDirectory>;
 }
+

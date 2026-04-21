@@ -9,9 +9,9 @@ namespace margelo::nitro::node_fs {
 
 class HybridDirIterator : public HybridHybridDirIteratorSpec {
 public:
-  HybridDirIterator(DirIter *iter)
+  HybridDirIterator(DirIter *iter, std::function<void()> cleanup = nullptr)
       : HybridObject(HybridHybridDirIteratorSpec::TAG),
-        HybridHybridDirIteratorSpec(), _iter(iter) {}
+        HybridHybridDirIteratorSpec(), _iter(iter), _cleanup(cleanup) {}
   virtual ~HybridDirIterator() { close(); }
 
   std::optional<std::string> next() override;
@@ -19,6 +19,7 @@ public:
 
 private:
   DirIter *_iter;
+  std::function<void()> _cleanup;
 };
 
 } // namespace margelo::nitro::node_fs

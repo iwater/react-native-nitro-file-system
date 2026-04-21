@@ -1,6 +1,8 @@
 import { NitroFileSystem } from './native'
-import type { Stats as NitroStats } from './specs/HybridFileSystem.nitro'
+import type { Stats as NitroStats, PickerOptions, PickedFile, PickedDirectory } from './specs/HybridFileSystem.nitro'
 import { Buffer } from 'react-native-nitro-buffer'
+
+export { PickerOptions, PickedFile, PickedDirectory }
 
 // --- Constants ---
 export const constants = {
@@ -804,6 +806,16 @@ export function rename(oldPath: PathLike, newPath: PathLike, callback?: Callback
             callback?.(e);
         }
     });
+}
+
+// --- Picker APIs ---
+
+export async function pickFiles(options: PickerOptions = {}): Promise<PickedFile[]> {
+    return NitroFileSystem.pickFiles(options);
+}
+
+export async function pickDirectory(options: PickerOptions = {}): Promise<PickedDirectory> {
+    return NitroFileSystem.pickDirectory(options);
 }
 
 
@@ -2145,4 +2157,6 @@ export default {
     getBookmark,
     resolveBookmark,
     getTempPath,
+    pickFiles,
+    pickDirectory,
 };

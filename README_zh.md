@@ -9,7 +9,8 @@
 - 🛠️ **Node.js 兼容 API**：支持 `readFile`, `writeFile`, `mkdir`, `stat` 等常用 `fs` 方法（同步与异步）。
 - 🏗️ **流式支持**：内置 `ReadStream` 和 `WriteStream`，适用于大数据流处理。
 - 📂 **目录与监听**：支持目录迭代查询及文件系统变更监听。
-- 🌐 **URL 路径协议支持**：支持 `file://` URI 和标准 `URL` 对象，并自动解码百分号编码（如 `%20`）。
+- 🌐 **URL 路径协议支持**：支持 `file://`、`bookmark://` (iOS) 和 `content://` (Android) URI。
+- 🔓 **原生选择器**：内置跨平台文件与目录选择器，支持持久化访问权限。
 
 
 ## 与其他库的对比
@@ -41,6 +42,7 @@ yarn add react-native-nitro-file-system react-native-nitro-modules react-native-
 | **链接** | ✅ 100% | `link`, `symlink`, `readlink`, `realpath` |
 | **文件监听** | ✅ 100% | `watch`, `watchFile`, `unwatchFile` |
 | **流式处理** | ✅ 100% | `createReadStream`, `createWriteStream` |
+| **原生选择器**| ✅ 100% | `pickFiles`, `pickDirectory` |
 | **Promises** | ✅ 100% | `fs.promises.*` (全功能覆盖) |
 
 ## 基础用法
@@ -127,6 +129,110 @@ const content = await fs.promises.readFile(bookmark);
 const path = resolveBookmark(bookmark);
 console.log(path); // "/path/to/file"
 ```
+
+### 原生文件选择器 (Native Picker)
+
+Nitro File System 内置了高性能的原生文件和目录选择器，与库的路径系统完美集成。
+
+```typescript
+import fs, { pickFiles, pickDirectory } from 'react-native-nitro-file-system';
+
+// 1. 选择多个图片文件
+const files = await pickFiles({
+  multiple: true,
+  extensions: ['.jpg', '.png'],
+  requestLongTermAccess: true // 获取持久访问权限
+});
+
+for (const file of files) {
+  console.log(`选择了: ${file.name}，路径为: ${file.path}`);
+  if (file.bookmark) {
+    console.log(`持久化书签: ${file.bookmark}`);
+  }
+  // 使用返回的路径直接读取文件
+  const data = await fs.promises.readFile(file.path);
+}
+
+// 2. 选择一个目录
+const picked = await pickDirectory({
+  requestLongTermAccess: true
+});
+console.log(`选中的目录物理路径: ${picked.path}`);
+if (picked.bookmark) {
+  console.log(`持久化书签: ${picked.bookmark}`);
+}
+
+// 列出选中目录下的文件 (可以使用 path 或 bookmark)
+const entries = await fs.promises.readdir(picked.bookmark ?? picked.path);
+console.log(entries);
+```
+
+#### 选择器选项 (Pick Options)
+| 选项 | 类型 | 描述 |
+| :--- | :--- | :--- |
+| `multiple` | `boolean` | 是否允许选择多个文件 (默认为 `false`)。仅适用于 `pickFiles`。 |
+| `extensions` | `string[]` | 过滤特定的文件后缀 (例如 `['.pdf', '.docx']`)。仅适用于 `pickFiles`。 |
+| `requestLongTermAccess` | `boolean` | 若为 `true`，Android 会自动获取持久化 URI 权限，iOS 则会返回 `bookmark://` URI。 |
+
+#### 返回结果说明 (Picked Result)
+- `pickFiles` 返回 `Promise<PickedFile[]>`
+- `pickDirectory` 返回 `Promise<PickedDirectory>`
+
+| 属性 | 类型 | 描述 |
+| :--- | :--- | :--- |
+| `path` | `string` | 文件或目录的物理路径。 |
+| `bookmark` | `string` | (可选) 用于持久访问的 `bookmark://` (iOS) 或 `content://` (Android) URI。 |
+| `name` | `string` | 文件显示名称 (仅限 `PickedFile`)。 |
+| `size` | `number` | 文件大小，单位字节 (仅限 `PickedFile`)。 |
+
+#### 平台差异说明
+- **Android**: 在 `path` 和 `bookmark` 中均返回 `content://` URI。如果开启了 `requestLongTermAccess`，库会自动为你调用 `takePersistableUriPermission` 以确保重启后仍可访问。
+- **iOS**: 在 `path` 中返回标准文件路径。如果开启了 `requestLongTermAccess`，则在 `bookmark` 中返回 `bookmark://` URI，提供安全作用域（Security-scoped）访问权限。本库的所有 `fs` 方法都原生支持这种 URI。
+
+
+
+## 原生选择器与持久化访问
+
+在 iOS 和 Android 上，访问应用程序沙盒之外的文件（如外部存储或特定文件夹）需要用户的显式授权。本库提供了原生选择器，并支持通过安全范围书签（iOS Security Scoped Bookmarks）或持久化 URI 权限（Android Persistable URI Permissions）来维持对这些文件的持久访问能力。
+
+### 选取文件与目录
+
+```typescript
+import fs from 'react-native-nitro-file-system';
+
+// 选取文件（返回 PickedFile 数组）
+const files = await fs.pickFiles({
+  multiple: true,
+  extensions: ['.txt', '.pdf'],
+  requestLongTermAccess: true    // 推荐开启，用于获取持久访问权限
+});
+
+// 选取目录（返回 PickedDirectory）
+const picked = await fs.pickDirectory({
+  requestLongTermAccess: true
+});
+console.log(picked.path);     // 物理路径
+console.log(picked.bookmark); // iOS: bookmark://... | Android: content://...
+
+// 你可以直接将返回的 bookmark 用于任何 fs 方法
+const items = fs.readdirSync(picked.bookmark ?? picked.path);
+```
+
+### iOS 安全范围书签 (Security Scoped Bookmarks)
+
+当在 `pickFiles` 中设置 `requestLongTermAccess: true` 或使用 `pickDirectory` 时，本库在 iOS 上会返回特殊的 `bookmark://` 协议 URI。该 URI 内部嵌入了安全范围书签数据。
+
+- **无感访问**：本库会自动为每一个使用 `bookmark://` 协议的 `fs` 调用处理 `startAccessingSecurityScopedResource`，无需开发者手动管理。
+- **路径拼接支持**：你可以将子路径直接拼接到书签 URI 后（例如：`${uri}/subdir/file.txt`），本库会自动解析并维持安全范围访问。
+- **持久存储**：这些 URI 可以被安全地保存（如存入 MMKV）并在应用程序重启后继续使用。
+- **手动生成**：可使用 `fs.getBookmark(path)` 为现有文件或目录生成书签。
+
+### Android 持久化 URI
+
+在 Android 上，`pickFiles` 和 `pickDirectory` 返回 `content://` URI。本库会自动尝试获取持久化 URI 权限（takePersistableUriPermission），确保应用在系统重启后仍可访问该路径。
+
+- **全面兼容**：Node.js 兼容 API 支持直接使用 `content://` URI 进行读、写及目录列举。
+- **SAF 目录树支持**：对于 `pickDirectory` 返回的目录树 URI，支持使用 `readdir` 和 `stat` 进行深度遍历。
 
 ## 许可证
 
