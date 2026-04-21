@@ -45,6 +45,35 @@ yarn add react-native-nitro-file-system react-native-nitro-modules react-native-
 | **原生选择器**| ✅ 100% | `pickFiles`, `pickDirectory` |
 | **Promises** | ✅ 100% | `fs.promises.*` (全功能覆盖) |
 
+## 标准路径
+
+本库提供了一个 `Paths` 对象，包含了一系列常用的跨平台系统目录路径。
+
+```typescript
+import { Paths } from 'react-native-nitro-file-system';
+
+console.log(Paths.cache);           // 应用缓存目录 (Caches)
+console.log(Paths.document);        // 应用文档目录 (Documents)
+console.log(Paths.temp);            // 系统临时目录 (Temporary)
+console.log(Paths.library);         // (仅 iOS) 库目录 (Library)
+console.log(Paths.mainBundle);      // (仅 iOS) App Bundle 目录
+console.log(Paths.externalCache);   // (仅 Android) 外部缓存目录
+console.log(Paths.externalStorage); // (仅 Android) 外部存储根目录
+```
+
+| 属性名 | 支持平台 | 描述 |
+| :--- | :--- | :--- |
+| `cache` | 全平台 | 应用程序专用缓存目录的绝对路径。 |
+| `document` | 全平台 | 应用程序专用文档目录的绝对路径。 |
+| `temp` | 全平台 | 系统临时目录的绝对路径。 |
+| `download` | 全平台 | 下载目录的绝对路径。 |
+| `pictures` | 全平台 | 图片目录的绝对路径。 |
+| `library` | iOS | `NSLibraryDirectory` 的绝对路径。 |
+| `mainBundle` | iOS | 应用程序主资源包 (Main Bundle) 的绝对路径。 |
+| `externalCache` | Android | 外部缓存目录的绝对路径。 |
+| `external` | Android | 外部文件目录的绝对路径。 |
+| `externalStorage`| Android | 外部存储根目录的绝对路径。 |
+
 ## 基础用法
 
 ### 读写文件
@@ -110,6 +139,37 @@ const data = fs.readFileSync(contentUri, 'base64');
 const stats = fs.statSync(contentUri);
 console.log(stats.size);
 ```
+
+### Android Assets (asset://) 支持
+
+本库支持通过 `asset://` 协议直接访问 Android 的 `assets` 目录，性能极高。
+
+- **仅限读取**：由于 APK assets 是只读打包的，因此仅支持读取类操作。
+- **路径格式**：使用 `asset://` 后接相对于项目 `src/main/assets` 目录的路径。
+- **copyFile 支持**：支持在 `fs.copyFile` 和 `fs.copyFileSync` 中将 `asset://` 作为**源路径**（source），方便将内置资源释放到可写目录。
+
+```typescript
+import fs from 'react-native-nitro-file-system';
+
+// 将内置数据库拷贝到文档目录
+fs.copyFileSync('asset://data/db.sqlite', `${Paths.document}/app.db`);
+
+// 读取打包在 assets 里的配置文件
+const config = fs.readFileSync('asset://config/settings.json', 'utf8');
+
+// 列出 assets 目录下的文件
+const files = fs.readdirSync('asset://web-content');
+
+// 检查某个 asset 是否存在并获取信息
+if (fs.existsSync('asset://models/default.bin')) {
+  const stats = fs.statSync('asset://models/default.bin');
+  console.log(`资源大小: ${stats.size}`);
+}
+```
+
+**注意**：`asset://` 已在 **Android** 和 **iOS** 上受支持。
+- **Android**: 通过 `AssetManager` 直接从 APK 读取。
+- **iOS**: 自动映射到应用的 `Main Bundle` 目录。
 
 ### iOS 书签 (Bookmark) 支持
 

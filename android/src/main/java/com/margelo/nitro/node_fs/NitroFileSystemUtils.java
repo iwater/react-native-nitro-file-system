@@ -2,12 +2,17 @@ package com.margelo.nitro.node_fs;
 
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.res.AssetManager;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
 import android.util.Log;
 
+import com.facebook.react.bridge.ReactApplicationContext;
+
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +32,7 @@ public class NitroFileSystemUtils {
     public static void initialize(ReactApplicationContext ctx) {
         reactContext = ctx;
         context = ctx.getApplicationContext();
+        nSetAssetManager(ctx.getAssets());
     }
 
     private static ContentResolver getContentResolver() {
@@ -459,4 +465,40 @@ public class NitroFileSystemUtils {
             nativeOnDirPickError(promisePtr, e.getMessage());
         }
     }
+
+    public static String getDirectoryPath(String type) {
+        if (context == null) return "";
+        File dir = null;
+        switch (type) {
+            case "caches":
+                dir = context.getCacheDir();
+                break;
+            case "documents":
+                dir = context.getFilesDir();
+                break;
+            case "downloads":
+                dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                break;
+            case "externalCaches":
+                dir = context.getExternalCacheDir();
+                break;
+            case "externalDocuments":
+                dir = context.getExternalFilesDir(null);
+                break;
+            case "externalStorage":
+                dir = Environment.getExternalStorageDirectory();
+                break;
+            case "pictures":
+                dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
+                break;
+            case "temp":
+                dir = context.getCacheDir();
+                break;
+            case "mainBundle":
+                return context.getPackageResourcePath();
+        }
+        return dir != null ? dir.getAbsolutePath() : "";
+    }
+
+    private static native void nSetAssetManager(AssetManager assetManager);
 }

@@ -75,5 +75,8 @@ void withBookmarkPath(const std::string &uri, std::function<void(const std::stri
 void* startAccessingBookmark(const std::string &uri, std::string &outPath);
 void stopAccessingBookmark(void *token);
 
+std::string getDirectoryPathIOS(const std::string& type);
+std::unordered_map<std::string, std::string> getFileProtectionKeysIOS();
+
 } // namespace fs
 } // namespace nitro

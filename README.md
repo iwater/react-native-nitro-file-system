@@ -50,6 +50,35 @@ yarn add react-native-nitro-file-system react-native-nitro-modules react-native-
 | **Native Picker**| ✅ 100% | `pickFiles`, `pickDirectory` |
 | **Promises** | ✅ 100% | `fs.promises.*` (Full coverage) |
 
+## Standard Paths
+
+The library provides a `Paths` object containing common system directory paths for cross-platform use.
+
+```typescript
+import { Paths } from 'react-native-nitro-file-system';
+
+console.log(Paths.cache);           // App caches directory
+console.log(Paths.document);        // App documents directory
+console.log(Paths.temp);            // Temporary directory
+console.log(Paths.library);         // (iOS only) Library directory
+console.log(Paths.mainBundle);      // (iOS only) Main bundle directory
+console.log(Paths.externalCache);   // (Android only) External caches
+console.log(Paths.externalStorage); // (Android only) External storage root
+```
+
+| Path Property | Platform | Description |
+| :--- | :--- | :--- |
+| `cache` | All | The absolute path to the app's caches directory. |
+| `document` | All | The absolute path to the app's document directory. |
+| `temp` | All | The absolute path to the system temporary directory. |
+| `download` | All | The absolute path to the downloads directory. |
+| `pictures` | All | The absolute path to the pictures directory. |
+| `library` | iOS | The absolute path to the `NSLibraryDirectory`. |
+| `mainBundle` | iOS | The absolute path to the main bundle directory. |
+| `externalCache` | Android | The absolute path to the external caches directory. |
+| `external` | Android | The absolute path to the external files directory. |
+| `externalStorage`| Android | The absolute path to the external storage root directory. |
+
 ## Basic Usage
 
 ### Read and Write Files
@@ -115,6 +144,37 @@ const data = fs.readFileSync(contentUri, 'base64');
 const stats = fs.statSync(contentUri);
 console.log(stats.size);
 ```
+
+### Android Asset (asset://) Support
+
+The library provides direct, high-performance access to Android's `assets` directory via the `asset://` protocol. 
+
+- **Read-Only**: Since APK assets are packaged as read-only, only read-related operations are supported.
+- **Path format**: Use `asset://` followed by the relative path within your project's `src/main/assets` directory.
+- **copyFile Support**: You can use `asset://` as the **source** path in `fs.copyFile` and `fs.copyFileSync` to extract assets to other directories.
+
+```typescript
+import fs from 'react-native-nitro-file-system';
+
+// Copy an asset to the documents directory
+fs.copyFileSync('asset://data/db.sqlite', `${Paths.document}/app.db`);
+
+// Read a bundled configuration file
+const config = fs.readFileSync('asset://config/settings.json', 'utf8');
+
+// List files in an asset directory
+const files = fs.readdirSync('asset://web-content');
+
+// Check if an asset exists
+if (fs.existsSync('asset://models/default.bin')) {
+  const stats = fs.statSync('asset://models/default.bin');
+  console.log(`Asset size: ${stats.size}`);
+}
+```
+
+**Note**: `asset://` is supported on both **Android** and **iOS**. 
+- On **Android**, it accesses binary data directly from the APK via `AssetManager`.
+- On **iOS**, it maps to the `Main Bundle` directory.
 
 ### iOS Bookmark URI Support
 

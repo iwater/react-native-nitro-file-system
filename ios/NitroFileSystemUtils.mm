@@ -7,6 +7,7 @@
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <objc/runtime.h>
+#include <unordered_map>
 
 #import "../nitrogen/generated/shared/c++/PickedFile.hpp"
 #import "../nitrogen/generated/shared/c++/PickedDirectory.hpp"
@@ -569,6 +570,37 @@ void pickDirectoryIOS(bool requestLongTermAccess,
     }
     [rootContent presentViewController:picker animated:YES completion:nil];
   });
+}
+
+std::string getDirectoryPathIOS(const std::string& type) {
+    @autoreleasepool {
+        NSString *path = nil;
+        if (type == "caches") {
+            path = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) firstObject];
+        } else if (type == "documents") {
+            path = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+        } else if (type == "library") {
+            path = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
+        } else if (type == "pictures") {
+            path = [NSSearchPathForDirectoriesInDomains(NSPicturesDirectory, NSUserDomainMask, YES) firstObject];
+        } else if (type == "temp") {
+            path = NSTemporaryDirectory();
+        } else if (type == "mainBundle") {
+            path = [[NSBundle mainBundle] bundlePath];
+        }
+        
+        if (!path) return "";
+        return std::string(path.UTF8String ?: "");
+    }
+}
+
+std::unordered_map<std::string, std::string> getFileProtectionKeysIOS() {
+    return {
+        {"Complete", std::string(NSFileProtectionComplete.UTF8String)},
+        {"CompleteUnlessOpen", std::string(NSFileProtectionCompleteUnlessOpen.UTF8String)},
+        {"CompleteUntilFirstUserAuthentication", std::string(NSFileProtectionCompleteUntilFirstUserAuthentication.UTF8String)},
+        {"None", std::string(NSFileProtectionNone.UTF8String)}
+    };
 }
 
 } // namespace fs

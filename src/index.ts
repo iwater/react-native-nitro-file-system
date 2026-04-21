@@ -39,6 +39,20 @@ export const constants = {
     W_OK: 2,
     X_OK: 1,
 };
+export const FileProtectionKeys = NitroFileSystem.fileProtectionKeys;
+
+export const Paths = {
+    cache: NitroFileSystem.cachesDirectoryPath,
+    document: NitroFileSystem.documentDirectoryPath,
+    download: NitroFileSystem.downloadDirectoryPath,
+    externalCache: NitroFileSystem.externalCachesDirectoryPath,
+    external: NitroFileSystem.externalDirectoryPath,
+    externalStorage: NitroFileSystem.externalStorageDirectoryPath,
+    library: NitroFileSystem.libraryDirectoryPath,
+    mainBundle: NitroFileSystem.mainBundlePath,
+    pictures: NitroFileSystem.picturesDirectoryPath,
+    temp: NitroFileSystem.temporaryDirectoryPath,
+}
 
 // --- Types ---
 export type PathLike = string | URL;
@@ -2159,4 +2173,7 @@ export default {
     getTempPath,
     pickFiles,
     pickDirectory,
+    // Path constants
+    Paths,
+    FileProtectionKeys,
 };

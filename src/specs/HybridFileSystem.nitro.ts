@@ -112,5 +112,18 @@ export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c
     // Picker API
     pickFiles(options: FilePickerOptions): Promise<PickedFile[]>;
     pickDirectory(options?: DirectoryPickerOptions): Promise<PickedDirectory>;
+
+    // Path constants (getters)
+    readonly cachesDirectoryPath: string;
+    readonly documentDirectoryPath: string;
+    readonly downloadDirectoryPath: string;
+    readonly externalCachesDirectoryPath: string;
+    readonly externalDirectoryPath: string;
+    readonly externalStorageDirectoryPath: string;
+    readonly libraryDirectoryPath: string;
+    readonly mainBundlePath: string;
+    readonly picturesDirectoryPath: string;
+    readonly temporaryDirectoryPath: string;
+    readonly fileProtectionKeys: Record<string, string>;
 }
 

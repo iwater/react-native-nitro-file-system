@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 namespace margelo::nitro::node_fs {
 
@@ -17,6 +18,19 @@ public:
     std::cout << "[HybridFileSystem] Constructor called successfully"
               << std::endl;
   }
+
+  // Properties
+  std::string getCachesDirectoryPath() override;
+  std::string getDocumentDirectoryPath() override;
+  std::string getDownloadDirectoryPath() override;
+  std::string getExternalCachesDirectoryPath() override;
+  std::string getExternalDirectoryPath() override;
+  std::string getExternalStorageDirectoryPath() override;
+  std::string getLibraryDirectoryPath() override;
+  std::string getMainBundlePath() override;
+  std::string getPicturesDirectoryPath() override;
+  std::string getTemporaryDirectoryPath() override;
+  std::unordered_map<std::string, std::string> getFileProtectionKeys() override;
 
   double open(const std::string &path, double flags, double mode) override;
   void close(double fd) override;

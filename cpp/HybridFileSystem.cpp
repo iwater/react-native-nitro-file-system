@@ -12,6 +12,8 @@
 
 #ifdef __ANDROID__
 #include <jni.h>
+#include <android/asset_manager.h>
+#include <android/asset_manager_jni.h>
 namespace margelo::nitro::node_fs {
 JNIEnv *getJNIEnv();
 }
@@ -21,6 +23,126 @@ JNIEnv *getJNIEnv();
 #endif
 
 namespace margelo::nitro::node_fs {
+
+#ifdef __ANDROID__
+static AAssetManager* gAssetManager = nullptr;
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_margelo_nitro_node_1fs_NitroFileSystemUtils_nSetAssetManager(JNIEnv* env, jclass, jobject assetManager) {
+    if (assetManager != nullptr) {
+        gAssetManager = AAssetManager_fromJava(env, assetManager);
+    }
+}
+
+std::string getAndroidDirectoryPath(const std::string& type) {
+    // ...
+    JNIEnv *env = getJNIEnv();
+    if (env) {
+        jclass cls = env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+        if (cls) {
+            jmethodID mid = env->GetStaticMethodID(cls, "getDirectoryPath", "(Ljava/lang/String;)Ljava/lang/String;");
+            if (mid) {
+                jstring jType = env->NewStringUTF(type.c_str());
+                jstring res = (jstring)env->CallStaticObjectMethod(cls, mid, jType);
+                env->DeleteLocalRef(jType);
+                if (res) {
+                    const char *str = env->GetStringUTFChars(res, nullptr);
+                    std::string result(str);
+                    env->ReleaseStringUTFChars(res, str);
+                    env->DeleteLocalRef(res);
+                    env->DeleteLocalRef(cls);
+                    return result;
+                }
+            }
+            env->DeleteLocalRef(cls);
+        }
+    }
+    return "";
+}
+#endif
+
+#ifdef __ANDROID__
+bool isAssetPath(const std::string& path) {
+    return path.compare(0, 8, "asset://") == 0;
+}
+
+std::string getAssetPath(const std::string& path) {
+    return path.substr(8);
+}
+
+std::shared_ptr<ArrayBuffer> readAssetBuffer(const std::string& assetPath) {
+    if (gAssetManager == nullptr) {
+        throw std::runtime_error("AssetManager not initialized. Did you forget to call NitroFileSystemUtils.initialize()?");
+    }
+    
+    AAsset* asset = AAssetManager_open(gAssetManager, assetPath.c_str(), AASSET_MODE_BUFFER);
+    if (!asset) {
+        throw std::runtime_error("Could not open asset: " + assetPath);
+    }
+    
+    off_t size = AAsset_getLength(asset);
+    if (size <= 0) {
+        AAsset_close(asset);
+        return ArrayBuffer::allocate(0);
+    }
+
+    uint8_t* rawData = new uint8_t[size];
+    int readCount = AAsset_read(asset, rawData, size);
+    AAsset_close(asset);
+
+    if (readCount < 0) {
+        delete[] rawData;
+        throw std::runtime_error("Failed to read asset: " + assetPath);
+    }
+    
+    auto buffer = ArrayBuffer::copy(rawData, readCount);
+    delete[] rawData;
+    return buffer;
+}
+
+Stats statAsset(const std::string& assetPath) {
+    if (gAssetManager == nullptr) {
+         throw std::runtime_error("AssetManager not initialized.");
+    }
+    AAsset* asset = AAssetManager_open(gAssetManager, assetPath.c_str(), AASSET_MODE_BUFFER);
+    if (!asset) {
+        // Fallback: check if it's a directory by opening it as a dir
+        AAssetDir* dir = AAssetManager_openDir(gAssetManager, assetPath.c_str());
+        if (dir) {
+            bool hasEntries = AAssetDir_getNextFileName(dir) != nullptr;
+            AAssetDir_close(dir);
+            if (hasEntries || assetPath.empty() || assetPath == ".") {
+                // Return a directory stat
+                return Stats(0, 0, S_IFDIR | 0555, 1, 0, 0, 0, 0, 4096, 0, 0, 0, 0, 0);
+            }
+        }
+        throw std::runtime_error("Asset not found: " + assetPath);
+    }
+    
+    off_t size = AAsset_getLength(asset);
+    AAsset_close(asset);
+    
+    // mode: S_IFREG (regular file) | S_IRUSR (read access)
+    return Stats(0, 0, S_IFREG | 0444, 1, 0, 0, 0, static_cast<double>(size), 4096, 0, 0, 0, 0, 0);
+}
+
+std::vector<std::string> readdirAsset(const std::string& assetPath) {
+    if (gAssetManager == nullptr) {
+        throw std::runtime_error("AssetManager not initialized.");
+    }
+    AAssetDir* dir = AAssetManager_openDir(gAssetManager, assetPath.c_str());
+    if (!dir) {
+        throw std::runtime_error("Could not open asset directory: " + assetPath);
+    }
+    
+    std::vector<std::string> entries;
+    while (const char* entryName = AAssetDir_getNextFileName(dir)) {
+        entries.push_back(entryName);
+    }
+    AAssetDir_close(dir);
+    return entries;
+}
+#endif
 
 Stats toStats(const RNStats &s) {
   return Stats(static_cast<double>(s.dev), static_cast<double>(s.ino),
@@ -342,6 +464,10 @@ Stats HybridFileSystem::stat(const std::string &rawPath) {
   std::string path = normalizePath(rawPath);
 
 #ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    return statAsset(getAssetPath(path));
+  }
+
   if (path.find("content://") == 0) {
     JNIEnv *env = getJNIEnv();
     if (env) {
@@ -466,6 +592,9 @@ std::vector<std::string> HybridFileSystem::readdir(const std::string &rawPath) {
   }
 #endif
 #ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    return readdirAsset(getAssetPath(path));
+  }
   if (path.find("content://") == 0) {
     JNIEnv *env = getJNIEnv();
     if (env) {
@@ -558,6 +687,11 @@ void HybridFileSystem::copyFile(const std::string &rawSrc, const std::string &ra
   std::string dest = normalizePath(rawDest);
 
 #ifdef __ANDROID__
+  if (isAssetPath(src)) {
+    auto buffer = readAssetBuffer(getAssetPath(src));
+    this->writeFile(rawDest, buffer);
+    return;
+  }
   if (src.find("content://") == 0 || dest.find("content://") == 0) {
     JNIEnv *env = getJNIEnv();
     if (env == nullptr) {
@@ -605,6 +739,10 @@ HybridFileSystem::readFile(const std::string &rawPath) {
   std::string path = normalizePath(rawPath);
 
 #ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    return readAssetBuffer(getAssetPath(path));
+  }
+
   if (path.find("content://") == 0) {
     // 1. Open
     double fd = this->open(path, O_RDONLY, 0);
@@ -757,6 +895,106 @@ std::string HybridFileSystem::getTempPath() {
   return result;
 }
 
+std::string HybridFileSystem::getCachesDirectoryPath() {
+#ifdef __ANDROID__
+  return getAndroidDirectoryPath("caches");
+#elif defined(__APPLE__)
+  return ::nitro::fs::getDirectoryPathIOS("caches");
+#else
+  return "";
+#endif
+}
+
+std::string HybridFileSystem::getDocumentDirectoryPath() {
+#ifdef __ANDROID__
+  return getAndroidDirectoryPath("documents");
+#elif defined(__APPLE__)
+  return ::nitro::fs::getDirectoryPathIOS("documents");
+#else
+  return "";
+#endif
+}
+
+std::string HybridFileSystem::getDownloadDirectoryPath() {
+#ifdef __ANDROID__
+  return getAndroidDirectoryPath("downloads");
+#elif defined(__APPLE__)
+  return ::nitro::fs::getDirectoryPathIOS("documents");
+#else
+  return "";
+#endif
+}
+
+std::string HybridFileSystem::getExternalCachesDirectoryPath() {
+#ifdef __ANDROID__
+  return getAndroidDirectoryPath("externalCaches");
+#else
+  return "";
+#endif
+}
+
+std::string HybridFileSystem::getExternalDirectoryPath() {
+#ifdef __ANDROID__
+  return getAndroidDirectoryPath("externalDocuments");
+#else
+  return "";
+#endif
+}
+
+std::string HybridFileSystem::getExternalStorageDirectoryPath() {
+#ifdef __ANDROID__
+  return getAndroidDirectoryPath("externalStorage");
+#else
+  return "";
+#endif
+}
+
+std::string HybridFileSystem::getLibraryDirectoryPath() {
+#ifdef __APPLE__
+  return ::nitro::fs::getDirectoryPathIOS("library");
+#else
+  return "";
+#endif
+}
+
+std::string HybridFileSystem::getMainBundlePath() {
+#ifdef __ANDROID__
+  return getAndroidDirectoryPath("mainBundle");
+#elif defined(__APPLE__)
+  return ::nitro::fs::getDirectoryPathIOS("mainBundle");
+#else
+  return "";
+#endif
+}
+
+std::string HybridFileSystem::getPicturesDirectoryPath() {
+#ifdef __ANDROID__
+  return getAndroidDirectoryPath("pictures");
+#elif defined(__APPLE__)
+  return ::nitro::fs::getDirectoryPathIOS("pictures");
+#else
+  return "";
+#endif
+}
+
+std::string HybridFileSystem::getTemporaryDirectoryPath() {
+#ifdef __ANDROID__
+  return getAndroidDirectoryPath("temp");
+#elif defined(__APPLE__)
+  return ::nitro::fs::getDirectoryPathIOS("temp");
+#else
+  return "";
+#endif
+}
+
+std::unordered_map<std::string, std::string> HybridFileSystem::getFileProtectionKeys() {
+#ifdef __APPLE__
+  return ::nitro::fs::getFileProtectionKeysIOS();
+#else
+  return {};
+#endif
+}
+
 std::shared_ptr<HybridHybridDirIteratorSpec>
 HybridFileSystem::opendir(const std::string &rawPath) {
   std::string path = normalizePath(rawPath);
@@ -798,6 +1036,16 @@ std::string HybridFileSystem::normalizePath(const std::string &path) {
     return path.substr(7);
   } else if (path.find("file:/") == 0) {
     return path.substr(5);
+  } else if (path.find("asset://") == 0) {
+#ifdef __APPLE__
+    std::string relPath = path.substr(8);
+    std::string bundlePath = this->getMainBundlePath();
+    if (relPath.empty() || relPath == "/")
+      return bundlePath;
+    if (relPath[0] == '/')
+      return bundlePath + relPath;
+    return bundlePath + "/" + relPath;
+#endif
   }
   return path;
 }
