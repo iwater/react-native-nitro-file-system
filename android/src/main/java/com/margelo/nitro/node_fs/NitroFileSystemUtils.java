@@ -7,9 +7,10 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
-import android.provider.OpenableColumns;
 import android.provider.DocumentsContract;
+import android.provider.OpenableColumns;
 import android.util.Log;
+import android.webkit.MimeTypeMap;
 
 import com.facebook.react.bridge.ReactApplicationContext;
 
@@ -45,6 +46,57 @@ public class NitroFileSystemUtils {
     }
 
     /**
+     * Prepares a URI for content resolver operations.
+     * Handles "path-augmented" tree URIs by converting them to valid document URIs within the tree.
+     * e.g., content://auth/tree/rootId/sub/path -> content://auth/tree/rootId/document/rootId%2Fsub%2Fpath
+     */
+    private static Uri prepareUri(String uriString) {
+        try {
+            Uri uri = Uri.parse(uriString);
+            if (uri.getScheme() == null || !uri.getScheme().equals("content")) {
+                return uri;
+            }
+
+            List<String> segments = uri.getPathSegments();
+            // Check if it's a tree-based URI
+            // Standard tree URI: content://{auth}/tree/{treeId} (2 segments)
+            // Augmented tree URI: content://{auth}/tree/{treeId}/sub/path (> 2 segments)
+            if (segments.size() >= 2 && "tree".equals(segments.get(0))) {
+                // Check if it's already a document URI (contains "document" segment)
+                boolean isDocument = false;
+                for (String segment : segments) {
+                    if ("document".equals(segment)) {
+                        isDocument = true;
+                        break;
+                    }
+                }
+
+                if (!isDocument) {
+                    String authority = uri.getAuthority();
+                    String treeId = segments.get(1);
+
+                    // Reconstruct the document ID by joining all segments after "tree"
+                    StringBuilder docIdBuilder = new StringBuilder();
+                    for (int i = 1; i < segments.size(); i++) {
+                        if (docIdBuilder.length() > 0) {
+                            docIdBuilder.append("/");
+                        }
+                        docIdBuilder.append(segments.get(i));
+                    }
+                    String documentId = docIdBuilder.toString();
+
+                    // Build the proper document URI within the tree
+                    Uri treeUri = DocumentsContract.buildTreeDocumentUri(authority, treeId);
+                    return DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId);
+                }
+            }
+            return uri;
+        } catch (Exception e) {
+            return Uri.parse(uriString);
+        }
+    }
+
+    /**
      * Opens a file descriptor for the given Content URI.
      * Called from C++ via JNI.
      *
@@ -57,20 +109,68 @@ public class NitroFileSystemUtils {
             ContentResolver resolver = getContentResolver();
             if (resolver == null) return -1;
 
-            Uri uri = Uri.parse(uriString);
-            ParcelFileDescriptor pfd = resolver.openFileDescriptor(uri, mode);
+            Uri uri = prepareUri(uriString);
+            ParcelFileDescriptor pfd = null;
+            
+            try {
+                pfd = resolver.openFileDescriptor(uri, mode);
+            } catch (Exception e) {
+                // ExternalStorageProvider throws IllegalArgumentException (Failed to determine if child) 
+                // for non-existent files in Tree URIs, instead of FileNotFoundException.
+                boolean isWriting = mode.contains("w") || mode.contains("a") || mode.contains("+");
+                if (isWriting && uriString.contains("/tree/")) {
+                    try {
+                        Uri createdUri = createDocument(uriString);
+                        if (createdUri != null) {
+                            pfd = resolver.openFileDescriptor(createdUri, mode);
+                        } else {
+                            throw e;
+                        }
+                    } catch (Exception createEx) {
+                        Log.e(TAG, "Failed to create document: " + uriString, createEx);
+                        throw e;
+                    }
+                } else {
+                    throw e;
+                }
+            }
             
             if (pfd != null) {
-                // detatchFd() closes the ParcelFileDescriptor object but returns the 
+                // detachFd() closes the ParcelFileDescriptor object but returns the 
                 // native fd without closing it, transferring ownership to the caller.
                 return pfd.detachFd();
             }
         } catch (FileNotFoundException e) {
-            Log.e(TAG, "File not found: " + uriString, e);
+            Log.e(TAG, "File not found: " + uriString + " (mode: " + mode + ")");
         } catch (Exception e) {
-            Log.e(TAG, "Error opening content URI: " + uriString, e);
+            Log.e(TAG, "Error opening content URI: " + uriString + " (mode: " + mode + ")", e);
         }
         return -1;
+    }
+
+    /**
+     * Creates a document in the parent directory specified by the URI string.
+     */
+    private static Uri createDocument(String uriString) throws Exception {
+        int lastSlash = uriString.lastIndexOf('/');
+        if (lastSlash == -1) return null;
+
+        String parentUriString = uriString.substring(0, lastSlash);
+        String fileName = uriString.substring(lastSlash + 1);
+
+        Uri parentUri = prepareUri(parentUriString);
+        ContentResolver resolver = getContentResolver();
+        if (resolver == null) return null;
+
+        String mimeType = "application/octet-stream";
+        int dot = fileName.lastIndexOf('.');
+        if (dot != -1) {
+            String ext = fileName.substring(dot + 1).toLowerCase();
+            String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+            if (mime != null) mimeType = mime;
+        }
+
+        return DocumentsContract.createDocument(resolver, parentUri, mimeType, fileName);
     }
 
     /**
@@ -85,7 +185,7 @@ public class NitroFileSystemUtils {
             ContentResolver resolver = getContentResolver();
             if (resolver == null) return null;
 
-            Uri uri = Uri.parse(uriString);
+            Uri uri = prepareUri(uriString);
             Cursor cursor = resolver.query(uri, null, null, null, null);
             
             double size = 0;
@@ -93,13 +193,16 @@ public class NitroFileSystemUtils {
 
             if (cursor != null && cursor.moveToFirst()) {
                 int sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE);
-                if (!cursor.isNull(sizeIndex)) {
+                if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) {
                     size = cursor.getDouble(sizeIndex);
                 }
                 
-                // ContentResolver doesn't standardized lastModified in standard columns usually,
-                // but we can try to look for it or default to current time/0.
-                // For now, we mainly need size for read buffers.
+                // Try to get last modified if available (not standard in OpenableColumns but common)
+                int modIndex = cursor.getColumnIndex("last_modified");
+                if (modIndex != -1 && !cursor.isNull(modIndex)) {
+                    lastModified = cursor.getDouble(modIndex);
+                }
+                
                 cursor.close();
             }
             
@@ -109,11 +212,12 @@ public class NitroFileSystemUtils {
         }
         return null;
     }
+
     // Check if a content URI exists and is accessible
     public static boolean existsContentUri(String uriString) {
         if (context == null) return false;
         try {
-            Uri uri = Uri.parse(uriString);
+            Uri uri = prepareUri(uriString);
             // Try to open a read-only FD to check existence
             // Faster than querying provider for simple check
             ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(uri, "r");
@@ -122,7 +226,7 @@ public class NitroFileSystemUtils {
                 return true;
             }
         } catch (Exception e) {
-            // Log.e("NitroFS", "existsContentUri failed", e);
+            // ignore
         }
         return false;
     }
@@ -131,17 +235,16 @@ public class NitroFileSystemUtils {
     public static boolean deleteContentUri(String uriString) {
         if (context == null) return false;
         try {
-            Uri uri = Uri.parse(uriString);
+            Uri uri = prepareUri(uriString);
             // 1. Try DocumentsContract if it's a document URI
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT 
-                && android.provider.DocumentsContract.isDocumentUri(context, uri)) {
-                return android.provider.DocumentsContract.deleteDocument(context.getContentResolver(), uri);
+            if (DocumentsContract.isDocumentUri(context, uri)) {
+                return DocumentsContract.deleteDocument(context.getContentResolver(), uri);
             }
             // 2. Fallback to standard ContentResolver deletion
             int deletedEntries = context.getContentResolver().delete(uri, null, null);
             return deletedEntries > 0;
         } catch (Exception e) {
-            // Log.e("NitroFS", "deleteContentUri failed", e);
+            // ignore
         }
         return false;
     }
@@ -152,13 +255,13 @@ public class NitroFileSystemUtils {
     public static boolean copyContentUri(String sourceUriString, String destUriString) {
         if (context == null) return false;
         try {
-            Uri srcUri = Uri.parse(sourceUriString);
+            Uri srcUri = prepareUri(sourceUriString);
             // Convert plain paths to file:// URIs if scheme is missing
             if (srcUri.getScheme() == null) {
                 srcUri = Uri.fromFile(new java.io.File(sourceUriString));
             }
             
-            Uri destUri = Uri.parse(destUriString);
+            Uri destUri = prepareUri(destUriString);
             if (destUri.getScheme() == null) {
                 destUri = Uri.fromFile(new java.io.File(destUriString));
             }
@@ -318,7 +421,7 @@ public class NitroFileSystemUtils {
 
     public static String[] listContentUri(String uriString) {
         try {
-            Uri uri = Uri.parse(uriString);
+            Uri uri = prepareUri(uriString);
             Uri childrenUri;
             
             if (DocumentsContract.isTreeUri(uri)) {
