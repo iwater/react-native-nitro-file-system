@@ -25,6 +25,10 @@
             "rn_file_system"
         ],
         "extraLibDirs": [
+            "./mac"
+        ],
+        "extraFrameworks": [
+            "Foundation"
         ]
     }
 }

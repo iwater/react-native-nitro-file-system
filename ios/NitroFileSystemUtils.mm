@@ -4,8 +4,13 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+// UIKit 与 UniformTypeIdentifiers 只在 iOS 存在；macOS 上没有 UIDocumentPicker，
+// picker 系列在 macOS 走 reject 实现（见文件末尾）。TARGET_OS_IOS 由
+// Foundation 拉进来的 <TargetConditionals.h> 提供。
+#if TARGET_OS_IOS
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#endif
 #import <objc/runtime.h>
 #include <unordered_map>
 
@@ -16,7 +21,9 @@ using margelo::nitro::node_fs::PickedFile;
 using margelo::nitro::node_fs::PickedDirectory;
 
 
+#if TARGET_OS_IOS
 static char kNitroFSPickerDelegateKey;
+#endif
 
 NSURLBookmarkCreationOptions GetNitroBookmarkCreationOptions() {
     NSURLBookmarkCreationOptions opts = 0; // Default for iOS
@@ -40,6 +47,19 @@ NSURLBookmarkCreationOptions GetNitroBookmarkCreationOptions() {
   #define NITRO_RESOLUTION_OPTIONS (NSURLBookmarkResolutionWithSecurityScope | NSURLBookmarkResolutionWithoutUI)
 #endif
 
+// 把 NSData 书签编码成 bookmark:// URI。
+// 原先定义在 @implementation NitroFSPickerDelegate 内部，但 :384 的 getBookmark()
+// （macOS 也要走的路径）同样用它，因此必须挪到 picker 的 #if 之外，成为文件级函数。
+static std::string toBookmarkUri(NSData *bookmarkData) {
+    if (!bookmarkData) return "";
+    NSString *base64 = [bookmarkData base64EncodedStringWithOptions:0];
+    // Convert to URL-safe base64
+    base64 = [base64 stringByReplacingOccurrencesOfString:@"+" withString:@"-"];
+    base64 = [base64 stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+    return "bookmark://" + std::string(base64.UTF8String);
+}
+
+#if TARGET_OS_IOS
 @interface NitroFSPickerDelegate : NSObject <UIDocumentPickerDelegate>
 @property (nonatomic, assign) BOOL isDirPicker;
 @property (nonatomic, assign) BOOL requestLongTermAccess;
@@ -49,15 +69,6 @@ NSURLBookmarkCreationOptions GetNitroBookmarkCreationOptions() {
 @end
 
 @implementation NitroFSPickerDelegate
-
-static std::string toBookmarkUri(NSData *bookmarkData) {
-    if (!bookmarkData) return "";
-    NSString *base64 = [bookmarkData base64EncodedStringWithOptions:0];
-    // Convert to URL-safe base64
-    base64 = [base64 stringByReplacingOccurrencesOfString:@"+" withString:@"-"];
-    base64 = [base64 stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
-    return "bookmark://" + std::string(base64.UTF8String);
-}
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
   if (self.isDirPicker) {
@@ -138,6 +149,7 @@ static std::string toBookmarkUri(NSData *bookmarkData) {
 }
 @end
 
+#endif // TARGET_OS_IOS —— 以下均为 Foundation-only，macOS 同样编译
 
 namespace nitro {
 namespace fs {
@@ -451,6 +463,11 @@ void stopAccessingBookmark(void *token) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// picker 系列：仅 iOS。macOS 无 UIDocumentPicker，走 #else 的 reject 实现。
+// ---------------------------------------------------------------------------
+#if TARGET_OS_IOS
+
 void pickFilesIOS(bool multiple, bool requestLongTermAccess, margelo::nitro::node_fs::PickerMode mode, const std::vector<std::string>& extensions,
                   std::function<void(const std::vector<margelo::nitro::node_fs::PickedFile>&)> resolve,
                   std::function<void(const std::string&)> reject) {
@@ -571,6 +588,29 @@ void pickDirectoryIOS(bool requestLongTermAccess,
     [rootContent presentViewController:picker animated:YES completion:nil];
   });
 }
+
+#else // !TARGET_OS_IOS —— macOS
+
+// macOS 没有 UIDocumentPickerViewController。这两个函数在头文件里是无条件声明的，
+// cpp/HybridFileSystem.cpp 的 __APPLE__ 分支会调用它们，所以必须提供定义。
+// 语义与 iOS 的「用户取消」一致：reject 一个明确的错误字符串。
+// 宿主侧另有真实可用的替代路径——测试与普通用法都走 writeFileSync/readFileSync
+// 这类直接 API，picker 只影响交互式选文件。
+void pickFilesIOS(bool /*multiple*/, bool /*requestLongTermAccess*/,
+                  margelo::nitro::node_fs::PickerMode /*mode*/,
+                  const std::vector<std::string>& /*extensions*/,
+                  std::function<void(const std::vector<margelo::nitro::node_fs::PickedFile>&)> /*resolve*/,
+                  std::function<void(const std::string&)> reject) {
+  reject("File picker is not supported on macOS");
+}
+
+void pickDirectoryIOS(bool /*requestLongTermAccess*/,
+                      std::function<void(const margelo::nitro::node_fs::PickedDirectory&)> /*resolve*/,
+                      std::function<void(const std::string&)> reject) {
+  reject("Directory picker is not supported on macOS");
+}
+
+#endif // TARGET_OS_IOS
 
 std::string getDirectoryPathIOS(const std::string& type) {
     @autoreleasepool {
