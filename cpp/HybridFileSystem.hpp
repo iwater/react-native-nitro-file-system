@@ -3,7 +3,6 @@
 #include "rust_c_file_system.h"
 #include <NitroModules/ArrayBuffer.hpp>
 #include <NitroModules/HybridObject.hpp>
-#include <iostream>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -12,12 +11,13 @@ namespace margelo::nitro::node_fs {
 
 class HybridFileSystem : public HybridHybridFileSystemSpec {
 public:
+  // 注：此处曾有一行 `std::cout << "[HybridFileSystem] Constructor ..."`。
+  // 它是作者遗留的 debug 输出，却打在 **stdout** 上——Node 的 require('fs')
+  // 不打任何东西，于是任何用到 fs 的程序在 stdout 比对上必然不等。
+  // 已按 qjs-node 的 parity 判据（stdout 必须与 Node 逐字节一致）移除；
+  // 诊断输出本就该走 stderr，且这条在构造期无条件打印，没有保留价值。
   HybridFileSystem()
-      : HybridObject("NitroNodeFileSystem"), HybridHybridFileSystemSpec() {
-    // Debug: constructor called successfully
-    std::cout << "[HybridFileSystem] Constructor called successfully"
-              << std::endl;
-  }
+      : HybridObject("NitroNodeFileSystem"), HybridHybridFileSystemSpec() {}
 
   // Properties
   std::string getCachesDirectoryPath() override;
