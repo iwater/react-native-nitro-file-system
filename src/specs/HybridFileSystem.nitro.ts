@@ -126,5 +126,30 @@ export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c
     readonly picturesDirectoryPath: string;
     readonly temporaryDirectoryPath: string;
     readonly fileProtectionKeys: Record<string, string>;
+
+    // errno of the most recent failed native call (0 if the last one
+    // succeeded). The JS layer turns it into a Node-style error carrying
+    // `code` / `errno` / `syscall` / `path`, so that `err.code === 'ENOENT'`
+    // works the way it does in Node.
+    readonly lastErrno: number;
+
+    // POSIX name of `lastErrno` ("ENOENT", "EACCES", ...), or "" when the last
+    // native call did not fail. Resolved against the platform's own errno
+    // constants on the native side: the numbers behind these names differ
+    // between Darwin and Linux (`ENOTEMPTY` is 66 vs 39, `ELOOP` 62 vs 40, ...),
+    // so a JS-side table would be wrong on one of them.
+    readonly lastErrorCode: string;
+
+    // The platform's own `O_*` values, in the field order of the native
+    // `RNOpenFlags` struct:
+    //   O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_NOCTTY, O_TRUNC,
+    //   O_APPEND, O_DIRECTORY, O_NOATIME, O_NOFOLLOW, O_SYNC, O_DSYNC,
+    //   O_SYMLINK, O_DIRECT, O_NONBLOCK
+    // A negative entry means the platform has no such flag; the JS layer then
+    // omits that key, matching Node's `fs.constants` on that platform.
+    //
+    // Reported from the native side rather than hardcoded in JS so that
+    // `fs.constants` can never drift from the numbers `rn_fs_open` interprets.
+    readonly openFlagValues: number[];
 }
 

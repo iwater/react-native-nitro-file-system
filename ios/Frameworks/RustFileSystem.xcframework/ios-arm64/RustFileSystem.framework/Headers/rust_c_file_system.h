@@ -17,6 +17,25 @@ typedef struct DirIter DirIter;
 
 typedef struct WatcherHandle WatcherHandle;
 
+typedef struct RNOpenFlags {
+  int o_rdonly;
+  int o_wronly;
+  int o_rdwr;
+  int o_creat;
+  int o_excl;
+  int o_noctty;
+  int o_trunc;
+  int o_append;
+  int o_directory;
+  int o_noatime;
+  int o_nofollow;
+  int o_sync;
+  int o_dsync;
+  int o_symlink;
+  int o_direct;
+  int o_nonblock;
+} RNOpenFlags;
+
 typedef struct RNStats {
   uint64_t dev;
   uint64_t ino;
@@ -40,6 +59,29 @@ typedef struct RNIovec {
 } RNIovec;
 
 typedef void (*WatchCallback)(void*, const char*, int32_t);
+
+/**
+ * errno of the most recent failed entry point (0 if the last one succeeded).
+ */
+int rn_fs_last_errno(void);
+
+/**
+ * Overwrite the recorded errno. Exists so the C++ layer can tag failures it
+ * detects on its own (bookmark/`content://` URIs, undersized buffers, ...),
+ * which have no OS errno of their own. Without this, `rn_fs_last_errno()`
+ * would still hold the code of some *earlier*, unrelated failure and the JS
+ * layer would report a confidently wrong `code`.
+ */
+void rn_fs_set_errno(int code);
+
+/**
+ * Static, NUL-terminated name of `errno`, e.g. `2 -> "ENOENT"`. Returns
+ * `"UNKNOWN"` for a code the table does not cover. Never null; the caller
+ * must not free the result.
+ */
+const char *rn_fs_errno_name(int code);
+
+int rn_fs_open_flags(struct RNOpenFlags *out);
 
 int rn_fs_access(const char *path, int mode);
 

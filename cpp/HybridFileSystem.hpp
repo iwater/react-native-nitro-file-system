@@ -32,6 +32,17 @@ public:
   std::string getTemporaryDirectoryPath() override;
   std::unordered_map<std::string, std::string> getFileProtectionKeys() override;
 
+  // errno of the most recent failed native call (0 if the last one succeeded).
+  double getLastErrno() override;
+
+  // POSIX name of that errno ("ENOENT", ...), or "" when there is none.
+  std::string getLastErrorCode() override;
+
+  // The platform's own O_* values - see `openFlagValues` in
+  // HybridFileSystem.nitro.ts for the field order and the meaning of a negative
+  // entry.
+  std::vector<double> getOpenFlagValues() override;
+
   double open(const std::string &path, double flags, double mode) override;
   void close(double fd) override;
   double read(double fd, const std::shared_ptr<ArrayBuffer> &buffer,

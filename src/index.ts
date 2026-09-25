@@ -1,27 +1,103 @@
-import { NitroFileSystem } from './native'
+import { NitroFileSystem, nodeFsError } from './native'
 import type { Stats as NitroStats, FilePickerOptions, DirectoryPickerOptions, PickedFile, PickedDirectory } from './specs/HybridFileSystem.nitro'
 import { Buffer } from 'react-native-nitro-buffer'
 
 export { FilePickerOptions, DirectoryPickerOptions, PickedFile, PickedDirectory }
 
 // --- Constants ---
-export const constants = {
-    O_RDONLY: 0,
-    O_WRONLY: 1,
-    O_RDWR: 2,
-    O_CREAT: 64,
-    O_EXCL: 128,
-    O_NOCTTY: 256,
-    O_TRUNC: 512,
-    O_APPEND: 1024,
-    O_DIRECTORY: 65536,
-    O_NOATIME: 262144,
-    O_NOFOLLOW: 131072,
-    O_SYNC: 1052672,
-    O_DSYNC: 4096,
-    O_SYMLINK: 2097152,
-    O_DIRECT: 16384,
-    O_NONBLOCK: 2048,
+
+// The `O_*` block is built from the platform's own values on purpose.
+//
+// It used to be a literal - and that literal was a **Linux** table compiled
+// into every bundle. On macOS/iOS that is wrong, and it was wrong *silently*,
+// because the native layer used a second hardcoded copy of the same Linux
+// numbers. The two copies agreed with each other while both disagreed with
+// Node, so `fs.openSync(p, 'w')` worked end-to-end while
+// `fs.constants.O_CREAT` meant something else than it does in Node:
+//
+//   key       Linux   Darwin    so on Apple platforms the key actually meant
+//   O_CREAT      64       512   O_TRUNC
+//   O_TRUNC     512      1024   O_APPEND
+//   O_APPEND   1024         8   O_ASYNC
+//
+// The values now come from the native layer, which reads them from the
+// platform's <fcntl.h>. Two things fall out of that: `fs.constants` can never
+// drift from the numbers `rn_fs_open()` interprets, and the *set* of exported
+// keys matches Node's `fs.constants` on each platform (O_DIRECT / O_NOATIME do
+// not exist on Darwin, O_SYMLINK does not exist on Linux).
+//
+// ⚠️ This order is the field order of the native `RNOpenFlags` struct and of
+//    `openFlagValues` in specs/HybridFileSystem.nitro.ts. Changing one without
+//    the others is caught by tests/parity/cases/os_constants.js.
+const OPEN_FLAG_KEYS = [
+    'O_RDONLY', 'O_WRONLY', 'O_RDWR', 'O_CREAT', 'O_EXCL', 'O_NOCTTY',
+    'O_TRUNC', 'O_APPEND', 'O_DIRECTORY', 'O_NOATIME', 'O_NOFOLLOW',
+    'O_SYNC', 'O_DSYNC', 'O_SYMLINK', 'O_DIRECT', 'O_NONBLOCK',
+]
+
+/**
+ * `fs.constants`.
+ *
+ * The three optional keys are exactly the ones that are not defined on every
+ * platform: Darwin has no `O_NOATIME` / `O_DIRECT`, Linux has no `O_SYMLINK`.
+ * Node's `fs.constants` omits them on those platforms too, so the same
+ * feature-detection code works against both.
+ */
+export interface FsConstants {
+    // open(2) flags - values come from the platform
+    O_RDONLY: number
+    O_WRONLY: number
+    O_RDWR: number
+    O_CREAT: number
+    O_EXCL: number
+    O_NOCTTY: number
+    O_TRUNC: number
+    O_APPEND: number
+    O_DIRECTORY: number
+    O_NOFOLLOW: number
+    O_SYNC: number
+    O_DSYNC: number
+    O_NONBLOCK: number
+    O_NOATIME?: number
+    O_SYMLINK?: number
+    O_DIRECT?: number
+    // mode bits and access(2) - identical on every POSIX platform
+    S_IRWXU: number
+    S_IRUSR: number
+    S_IWUSR: number
+    S_IXUSR: number
+    S_IRWXG: number
+    S_IRGRP: number
+    S_IWGRP: number
+    S_IXGRP: number
+    S_IRWXO: number
+    S_IROTH: number
+    S_IWOTH: number
+    S_IXOTH: number
+    F_OK: number
+    R_OK: number
+    W_OK: number
+    X_OK: number
+}
+
+function buildOpenFlags(): Record<string, number> {
+    const values = NitroFileSystem.openFlagValues
+    const out: Record<string, number> = {}
+    for (let i = 0; i < OPEN_FLAG_KEYS.length; i++) {
+        const v = values[i]
+        // Negative means "this platform has no such flag". Omit the key - this
+        // is exactly what Node's `fs.constants` does on that platform, and a
+        // key that silently carries another flag's number is worse than no key.
+        if (typeof v === 'number' && v >= 0) {
+            out[OPEN_FLAG_KEYS[i]] = v
+        }
+    }
+    return out
+}
+
+export const constants: FsConstants = {
+    ...buildOpenFlags(),
+    // Mode bits and access(2) flags - identical on every POSIX platform.
     S_IRWXU: 448,
     S_IRUSR: 256,
     S_IWUSR: 128,
@@ -38,7 +114,10 @@ export const constants = {
     R_OK: 4,
     W_OK: 2,
     X_OK: 1,
-};
+    // The O_* keys are added by the spread above, from the platform. The
+    // assertion is needed because their presence cannot be checked statically -
+    // which platform they come from is only known at runtime.
+} as FsConstants;
 export const FileProtectionKeys = NitroFileSystem.fileProtectionKeys;
 
 export const Paths = {
@@ -321,7 +400,11 @@ export function openSync(path: PathLike, flags: string | number = 'r', mode: num
     const normalizedPath = normalizePath(path);
     const fd = NitroFileSystem.open(normalizedPath, flagsNum, mode);
     if (fd < 0) {
-        throw new Error(`ENOENT: no such file or directory, open '${normalizedPath}'`);
+        // No longer hardcodes ENOENT: every failure used to be reported as
+        // "ENOENT", even EACCES / EISDIR / EMFILE. `open` signals failure with
+        // a negative return value rather than by throwing, so the errno is
+        // picked up here from the native layer.
+        throw nodeFsError('open', normalizedPath);
     }
     return fd;
 }
@@ -347,7 +430,7 @@ export function open(path: PathLike, flags: string | number, mode?: number | Cal
         try {
             const fd = NitroFileSystem.open(normalizedPath, flagsNum, modeNum);
             if (fd < 0) {
-                callback?.(new Error(`ENOENT: no such file or directory, open '${normalizedPath}'`));
+                callback?.(nodeFsError('open', normalizedPath));
             } else {
                 callback?.(null, fd);
             }
@@ -611,7 +694,10 @@ export function statSync(path: PathLike, options?: StatOptions): Stats | BigIntS
         }
         return new Stats(stats);
     } catch (e) {
-        throw new Error(`ENOENT: no such file or directory, stat '${normalizedPath}'`);
+        // Used to discard the real error and throw a hardcoded ENOENT, so every
+        // stat failure claimed the path did not exist. NitroFileSystem.stat
+        // already carries the errno; just let it through.
+        throw e;
     }
 }
 
@@ -649,7 +735,8 @@ export function lstatSync(path: PathLike, options?: StatOptions): Stats | BigInt
         }
         return new Stats(stats);
     } catch (e) {
-        throw new Error(`ENOENT: no such file or directory, lstat '${normalizedPath}'`);
+        // See statSync: the real error carries the errno, don't replace it.
+        throw e;
     }
 }
 

@@ -2,6 +2,7 @@
 #include "HybridDirIterator.hpp"
 #include "HybridFileWatcher.hpp"
 #include "rust_c_file_system.h"
+#include <cerrno>
 #include <cstdio>
 #include <fcntl.h>
 #include <iostream>
@@ -201,6 +202,11 @@ double HybridFileSystem::open(const std::string &rawPath, double flags,
         }
       }
     }
+    // This failure is detected in C++ (not by the OS), so there is no errno
+    // behind it. Clear the recorded one: otherwise the JS layer would attach
+    // the code of some earlier, unrelated failure and report a plausible but
+    // wrong `err.code`.
+    rn_fs_set_errno(0);
     throw std::runtime_error("Failed to open content URI: " + path);
   }
 #endif
@@ -212,6 +218,9 @@ double HybridFileSystem::open(const std::string &rawPath, double flags,
       rn_fs_import_fd(fd);
       return static_cast<double>(fd);
     }
+    // No errno behind this one either - see the comment in the content://
+    // branch of open().
+    rn_fs_set_errno(0);
     throw std::runtime_error("Failed to open bookmark URI: " + path);
   }
 #endif
@@ -224,10 +233,15 @@ void HybridFileSystem::close(double fd) { rn_fs_close(static_cast<int>(fd)); }
 double HybridFileSystem::read(double fd,
                               const std::shared_ptr<ArrayBuffer> &buffer,
                               double offset, double length, double position) {
-  if (!buffer)
+  // Caller-side argument problem, not an OS error: no errno exists for it,
+  // so state one rather than leaving whatever the last failure recorded.
+  if (!buffer) {
+    rn_fs_set_errno(EINVAL);
     return -1;
+  }
 
   if (buffer->size() < offset + length) {
+    rn_fs_set_errno(EINVAL);
     return -1;
   }
 
@@ -239,10 +253,15 @@ double HybridFileSystem::read(double fd,
 double HybridFileSystem::write(double fd,
                                const std::shared_ptr<ArrayBuffer> &buffer,
                                double offset, double length, double position) {
-  if (!buffer)
+  // Caller-side argument problem, not an OS error: no errno exists for it,
+  // so state one rather than leaving whatever the last failure recorded.
+  if (!buffer) {
+    rn_fs_set_errno(EINVAL);
     return -1;
+  }
 
   if (buffer->size() < offset + length) {
+    rn_fs_set_errno(EINVAL);
     return -1;
   }
 
@@ -715,6 +734,7 @@ void HybridFileSystem::copyFile(const std::string &rawSrc, const std::string &ra
     env->DeleteLocalRef(utilsClass);
 
     if (!success) {
+      rn_fs_set_errno(0);
       throw std::runtime_error("copyFile (content://) failed via JNI helper");
     }
     return;
@@ -725,6 +745,7 @@ void HybridFileSystem::copyFile(const std::string &rawSrc, const std::string &ra
     if (::nitro::fs::copyBookmark(src, dest) == 0) {
       return;
     }
+    rn_fs_set_errno(0);
     throw std::runtime_error("copyFile (bookmark://) failed");
   }
 #endif
@@ -915,6 +936,7 @@ std::string HybridFileSystem::resolveBookmark(const std::string &bookmark) {
 std::string HybridFileSystem::getTempPath() {
   char *path = rn_fs_get_temp_dir();
   if (path == nullptr) {
+    rn_fs_set_errno(0);
     throw std::runtime_error("getTempPath failed");
   }
   std::string result(path);
@@ -1022,6 +1044,50 @@ std::unordered_map<std::string, std::string> HybridFileSystem::getFileProtection
 #endif
 }
 
+double HybridFileSystem::getLastErrno() {
+  return static_cast<double>(rn_fs_last_errno());
+}
+
+std::string HybridFileSystem::getLastErrorCode() {
+  int e = rn_fs_last_errno();
+  if (e == 0) {
+    return "";
+  }
+  const char *name = rn_fs_errno_name(e);
+  if (name == nullptr) {
+    return "";
+  }
+  std::string s(name);
+  // `rn_fs_errno_name` returns "UNKNOWN" for codes outside its table; report
+  // that as "no code" so the JS layer does not invent one.
+  return s == "UNKNOWN" ? std::string() : s;
+}
+
+std::vector<double> HybridFileSystem::getOpenFlagValues() {
+  RNOpenFlags flags{};
+  if (rn_fs_open_flags(&flags) != 0) {
+    return {};
+  }
+  return {
+      static_cast<double>(flags.o_rdonly),
+      static_cast<double>(flags.o_wronly),
+      static_cast<double>(flags.o_rdwr),
+      static_cast<double>(flags.o_creat),
+      static_cast<double>(flags.o_excl),
+      static_cast<double>(flags.o_noctty),
+      static_cast<double>(flags.o_trunc),
+      static_cast<double>(flags.o_append),
+      static_cast<double>(flags.o_directory),
+      static_cast<double>(flags.o_noatime),
+      static_cast<double>(flags.o_nofollow),
+      static_cast<double>(flags.o_sync),
+      static_cast<double>(flags.o_dsync),
+      static_cast<double>(flags.o_symlink),
+      static_cast<double>(flags.o_direct),
+      static_cast<double>(flags.o_nonblock),
+  };
+}
+
 std::shared_ptr<HybridHybridDirIteratorSpec>
 HybridFileSystem::opendir(const std::string &rawPath) {
   std::string path = normalizePath(rawPath);
@@ -1039,6 +1105,7 @@ HybridFileSystem::opendir(const std::string &rawPath) {
         }
         ::nitro::fs::stopAccessingBookmark(token);
     }
+    rn_fs_set_errno(0);
     throw std::runtime_error("opendir failed (bookmark): " + path);
   }
 #endif
