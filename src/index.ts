@@ -215,10 +215,18 @@ export class Stats {
         this.ctimeMs = stats.ctimeMs;
         this.birthtimeMs = stats.birthtimeMs;
 
-        this.atime = new Date(stats.atimeMs);
-        this.mtime = new Date(stats.mtimeMs);
-        this.ctime = new Date(stats.ctimeMs);
-        this.birthtime = new Date(stats.birthtimeMs);
+        // ⚠️ 必须 `Math.round`，不能直接 `new Date(stats.mtimeMs)`。
+        // `mtimeMs` 带亚毫秒小数（实测 1790508365815.8477），而 `new Date(<number>)` 按规范是
+        // **截断**（ToIntegerOrInfinity）⇒ 直接传会比 Node 少 1 ms。Node 的规则实测是
+        // **四舍五入到毫秒**（`os.utime` 受控实验：0.499999→0、0.5→1、0.8477→1）。
+        // 危害路径：`send` 的 ETag = `W/"<size hex>-<mtime.getTime() hex>"` ⇒
+        // `res.sendFile` / `res.download` / `express.static` 的 ETag 与 Node 差 1
+        // （实测 `W/"11-1a0e29d77f8"` vs `W/"11-1a0e29d77f7"`）。
+        // ⚠️ 只有 `Stats` 是四舍五入 —— `BigIntStats` 是**截断**（见该类注释），别统一。
+        this.atime = new Date(Math.round(stats.atimeMs));
+        this.mtime = new Date(Math.round(stats.mtimeMs));
+        this.ctime = new Date(Math.round(stats.ctimeMs));
+        this.birthtime = new Date(Math.round(stats.birthtimeMs));
     }
 
     private _checkModeProperty(property: number): boolean {
@@ -300,10 +308,17 @@ export class BigIntStats {
         this.ctimeNs = BigInt(Math.floor(stats.ctimeMs)) * 1000000n;
         this.birthtimeNs = BigInt(Math.floor(stats.birthtimeMs)) * 1000000n;
 
-        this.atime = new Date(stats.atimeMs);
-        this.mtime = new Date(stats.mtimeMs);
-        this.ctime = new Date(stats.ctimeMs);
-        this.birthtime = new Date(stats.birthtimeMs);
+        // ⚠️⚠️ `BigIntStats` 与 `Stats` 的取整规则**不同**，别「统一」（Node 实测）：
+        //     Stats.mtime      = new Date(**round**(mtimeMs))
+        //     BigIntStats.mtime = new Date(**trunc**(mtimeMs))  ← 即 new Date(Number(this.mtimeMs))
+        // 同一文件实测（ns=499900000）：`Stats` 得 …500、`BigIntStats` 得 …499。
+        // ⇒ 这里**不能**跟着 `Stats` 改成 `Math.round`（改了就与 Node 差 1 ms）。
+        // 用 `Number(this.xxxMs)` 是刻意的：镜像 Node 的结构（它由 BigInt 的 ms 构造 Date），
+        // 于是 `mtime.getTime() === Number(mtimeMs)` 这条不变量两侧都成立。
+        this.atime = new Date(Number(this.atimeMs));
+        this.mtime = new Date(Number(this.mtimeMs));
+        this.ctime = new Date(Number(this.ctimeMs));
+        this.birthtime = new Date(Number(this.birthtimeMs));
     }
 
     private _checkModeProperty(property: number): boolean {
