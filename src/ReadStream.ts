@@ -1,4 +1,7 @@
-import { Readable, ReadableOptions } from 'readable-stream';
+// 说明符用 core 名 `stream`：宿主侧由 qjs-node 内建表提供，RN 侧由本包依赖
+// `"stream": "npm:readable-stream@^4.7.0"` 提供，同一份实现（node 里 core `stream` 恒优先 ⇒ 该依赖惰性）。
+// ⚠️ 别改回裸 `readable-stream`：RN 上各包会解析到自己那份，跨包 `instanceof` 判假（#51）。
+import { Readable, ReadableOptions } from 'stream';
 import { NitroFileSystem } from './native';
 import { Buffer } from 'react-native-nitro-buffer';
 import { getFlags, PathLike, normalizePath } from './index';

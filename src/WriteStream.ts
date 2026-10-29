@@ -1,4 +1,5 @@
-import { Writable, WritableOptions } from 'readable-stream';
+// 说明符用 core 名 `stream`，理由见 `ReadStream.ts` 顶部（#51：单一实现，跨包 instanceof 不分叉）
+import { Writable, WritableOptions } from 'stream';
 import { NitroFileSystem } from './native';
 import { Buffer } from 'react-native-nitro-buffer';
 import { getFlags, PathLike, normalizePath } from './index';
