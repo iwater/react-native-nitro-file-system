@@ -63,6 +63,12 @@ function joinChildPath(dirPath: string, name: string): string {
     return base === '/' ? `/${name}` : `${base}/${name}`;
 }
 
+function toAssetUri(filepath: string): string {
+    if (filepath.startsWith('asset://')) return filepath;
+    const trimmed = filepath.replace(/^\/+/, '');
+    return `asset://${trimmed}`;
+}
+
 export function createRnfsCompat(fs: RnfsBackingFs) {
     const DocumentDirectoryPath = fs.Paths.document;
     const CachesDirectoryPath = fs.Paths.cache;
@@ -82,6 +88,10 @@ export function createRnfsCompat(fs: RnfsBackingFs) {
         } catch {
             return false;
         }
+    }
+
+    async function existsAssets(filepath: string): Promise<boolean> {
+        return exists(toAssetUri(filepath));
     }
 
     async function readFile(filepath: string, encoding: string = 'utf8'): Promise<string> {
@@ -157,6 +167,10 @@ export function createRnfsCompat(fs: RnfsBackingFs) {
         await fs.promises.copyFile(filepath, destPath);
     }
 
+    async function copyFileAssets(filepath: string, destPath: string): Promise<void> {
+        await fs.promises.copyFile(toAssetUri(filepath), destPath);
+    }
+
     async function moveFile(filepath: string, destPath: string): Promise<void> {
         try {
             await fs.promises.rename(filepath, destPath);
@@ -194,6 +208,7 @@ export function createRnfsCompat(fs: RnfsBackingFs) {
         LibraryDirectoryPath,
         PicturesDirectoryPath,
         exists,
+        existsAssets,
         readFile,
         writeFile,
         appendFile,
@@ -202,6 +217,7 @@ export function createRnfsCompat(fs: RnfsBackingFs) {
         readDir,
         stat,
         copyFile,
+        copyFileAssets,
         moveFile,
         getFSInfo,
         hash,

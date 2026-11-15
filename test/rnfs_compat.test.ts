@@ -143,6 +143,20 @@ describe('rnfs-compat layer', () => {
         await rnfs.copyFile('/doc/a.txt', '/doc/copy.txt');
         expect(backing['/doc/copy.txt'].toString('utf8')).toBe('hello');
 
+        // copyFileAssets & existsAssets
+        backing['asset://fonts/custom.ttf'] = Buffer.from('asset-data', 'utf8');
+        expect(await rnfs.existsAssets('fonts/custom.ttf')).toBe(true);
+        expect(await rnfs.existsAssets('/fonts/custom.ttf')).toBe(true);
+        expect(await rnfs.existsAssets('fonts/missing.ttf')).toBe(false);
+
+        await rnfs.copyFileAssets('fonts/custom.ttf', '/doc/font.ttf');
+        expect(mockHybrid.copyFile).toHaveBeenCalledWith('asset://fonts/custom.ttf', '/doc/font.ttf', 0);
+        expect(backing['/doc/font.ttf'].toString('utf8')).toBe('asset-data');
+
+        await rnfs.copyFileAssets('/fonts/custom.ttf', '/doc/font2.ttf');
+        expect(mockHybrid.copyFile).toHaveBeenCalledWith('asset://fonts/custom.ttf', '/doc/font2.ttf', 0);
+        expect(backing['/doc/font2.ttf'].toString('utf8')).toBe('asset-data');
+
         // EXDEV rename fallback -> cp + rm
         backing['/doc/exdev.txt'] = Buffer.from('cross', 'utf8');
         await rnfs.moveFile('/doc/exdev.txt', '/doc/moved.txt');
