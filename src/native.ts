@@ -59,6 +59,9 @@ const SYSCALL: Record<string, string> = {
     rm: 'rm',
     mkdtemp: 'mkdtemp',
     watch: 'watch',
+    statfs: 'statfs',
+    hashFile: 'open',
+    hashFileSync: 'open',
 }
 
 // libuv's `uv_strerror` wording, so `String(err)` matches Node's.

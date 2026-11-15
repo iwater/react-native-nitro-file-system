@@ -1,8 +1,54 @@
 import { NitroFileSystem, nodeFsError } from './native'
-import type { Stats as NitroStats, FilePickerOptions, DirectoryPickerOptions, PickedFile, PickedDirectory } from './specs/HybridFileSystem.nitro'
+import type { Stats as NitroStats, StatFs, FilePickerOptions, DirectoryPickerOptions, PickedFile, PickedDirectory } from './specs/HybridFileSystem.nitro'
 import { Buffer } from 'react-native-nitro-buffer'
+import {
+    Stats,
+    BigIntStats,
+    Dirent,
+    POSIX_MODE_AND_ACCESS_CONSTANTS,
+    getFlagsFromConstants,
+    normalizePath,
+    toFileUri,
+    toBigIntStatFs,
+} from './shared'
+import type {
+    PathLike,
+    HashAlgorithm,
+    DiskSpaceInfo,
+    BigIntStatFs,
+    NitroPaths,
+    FsConstants,
+    ReadOptions,
+    RmOptions,
+    CpOptions,
+    RmdirOptions,
+    StatOptions,
+} from './shared'
 
-export { FilePickerOptions, DirectoryPickerOptions, PickedFile, PickedDirectory }
+export {
+    FilePickerOptions,
+    DirectoryPickerOptions,
+    PickedFile,
+    PickedDirectory,
+    StatFs,
+    Stats,
+    BigIntStats,
+    normalizePath,
+    toFileUri,
+}
+export type {
+    PathLike,
+    HashAlgorithm,
+    DiskSpaceInfo,
+    BigIntStatFs,
+    NitroPaths,
+    FsConstants,
+    ReadOptions,
+    RmOptions,
+    CpOptions,
+    RmdirOptions,
+    StatOptions,
+}
 
 // --- Constants ---
 
@@ -35,51 +81,6 @@ const OPEN_FLAG_KEYS = [
     'O_SYNC', 'O_DSYNC', 'O_SYMLINK', 'O_DIRECT', 'O_NONBLOCK',
 ]
 
-/**
- * `fs.constants`.
- *
- * The three optional keys are exactly the ones that are not defined on every
- * platform: Darwin has no `O_NOATIME` / `O_DIRECT`, Linux has no `O_SYMLINK`.
- * Node's `fs.constants` omits them on those platforms too, so the same
- * feature-detection code works against both.
- */
-export interface FsConstants {
-    // open(2) flags - values come from the platform
-    O_RDONLY: number
-    O_WRONLY: number
-    O_RDWR: number
-    O_CREAT: number
-    O_EXCL: number
-    O_NOCTTY: number
-    O_TRUNC: number
-    O_APPEND: number
-    O_DIRECTORY: number
-    O_NOFOLLOW: number
-    O_SYNC: number
-    O_DSYNC: number
-    O_NONBLOCK: number
-    O_NOATIME?: number
-    O_SYMLINK?: number
-    O_DIRECT?: number
-    // mode bits and access(2) - identical on every POSIX platform
-    S_IRWXU: number
-    S_IRUSR: number
-    S_IWUSR: number
-    S_IXUSR: number
-    S_IRWXG: number
-    S_IRGRP: number
-    S_IWGRP: number
-    S_IXGRP: number
-    S_IRWXO: number
-    S_IROTH: number
-    S_IWOTH: number
-    S_IXOTH: number
-    F_OK: number
-    R_OK: number
-    W_OK: number
-    X_OK: number
-}
-
 function buildOpenFlags(): Record<string, number> {
     const values = NitroFileSystem.openFlagValues
     const out: Record<string, number> = {}
@@ -97,30 +98,32 @@ function buildOpenFlags(): Record<string, number> {
 
 export const constants: FsConstants = {
     ...buildOpenFlags(),
-    // Mode bits and access(2) flags - identical on every POSIX platform.
-    S_IRWXU: 448,
-    S_IRUSR: 256,
-    S_IWUSR: 128,
-    S_IXUSR: 64,
-    S_IRWXG: 56,
-    S_IRGRP: 32,
-    S_IWGRP: 16,
-    S_IXGRP: 8,
-    S_IRWXO: 7,
-    S_IROTH: 4,
-    S_IWOTH: 2,
-    S_IXOTH: 1,
-    F_OK: 0,
-    R_OK: 4,
-    W_OK: 2,
-    X_OK: 1,
+    ...POSIX_MODE_AND_ACCESS_CONSTANTS,
     // The O_* keys are added by the spread above, from the platform. The
     // assertion is needed because their presence cannot be checked statically -
     // which platform they come from is only known at runtime.
 } as FsConstants;
 export const FileProtectionKeys = NitroFileSystem.fileProtectionKeys;
+export const bundleUri: string = NitroFileSystem.bundleUri;
 
-export const Paths = {
+function getDefaultDiskSpace(): StatFs {
+    const candidates = [
+        NitroFileSystem.documentDirectoryPath,
+        NitroFileSystem.cachesDirectoryPath,
+        '/',
+    ].filter((p): p is string => Boolean(p));
+    let lastErr: unknown;
+    for (const candidate of candidates) {
+        try {
+            return NitroFileSystem.statfs(normalizePath(candidate));
+        } catch (err) {
+            lastErr = err;
+        }
+    }
+    throw lastErr ?? new Error('Unable to query disk space');
+}
+
+export const Paths: NitroPaths = {
     cache: NitroFileSystem.cachesDirectoryPath,
     document: NitroFileSystem.documentDirectoryPath,
     download: NitroFileSystem.downloadDirectoryPath,
@@ -131,11 +134,30 @@ export const Paths = {
     mainBundle: NitroFileSystem.mainBundlePath,
     pictures: NitroFileSystem.picturesDirectoryPath,
     temp: NitroFileSystem.temporaryDirectoryPath,
-}
+    bundleUri: NitroFileSystem.bundleUri,
+    documentUri: toFileUri(NitroFileSystem.documentDirectoryPath),
+    cacheUri: toFileUri(NitroFileSystem.cachesDirectoryPath),
+    tempUri: toFileUri(NitroFileSystem.temporaryDirectoryPath),
+} as NitroPaths;
 
-// --- Types ---
-export type PathLike = string | URL;
+Object.defineProperties(Paths, {
+    availableDiskSpace: {
+        enumerable: false,
+        configurable: true,
+        get(): number {
+            return getDefaultDiskSpace().availableBytes;
+        },
+    },
+    totalDiskSpace: {
+        enumerable: false,
+        configurable: true,
+        get(): number {
+            return getDefaultDiskSpace().totalBytes;
+        },
+    },
+});
 
+// --- Callback Types ---
 type Callback<T = void> = (err: Error | null, result?: T) => void;
 type ReadCallback = (err: Error | null, bytesRead?: number, buffer?: Buffer) => void;
 type WriteCallback = (err: Error | null, bytesWritten?: number, buffer?: Buffer) => void;
@@ -146,228 +168,9 @@ type MkdtempCallback = (err: Error | null, folder?: string) => void;
 type ReadvCallback = (err: Error | null, bytesRead?: number, buffers?: ArrayBufferView[]) => void;
 type WritevCallback = (err: Error | null, bytesWritten?: number, buffers?: ArrayBufferView[]) => void;
 
-export interface ReadOptions {
-    buffer?: Buffer | Uint8Array;
-    offset?: number;
-    length?: number;
-    position?: number | null;
-}
-
-export interface RmOptions {
-    force?: boolean;
-    maxRetries?: number;
-    recursive?: boolean;
-    retryDelay?: number;
-}
-
-export interface CpOptions {
-    recursive?: boolean;
-    force?: boolean;
-    errorOnExist?: boolean;
-    dereference?: boolean;
-    preserveTimestamps?: boolean;
-}
-
-export interface RmdirOptions {
-    maxRetries?: number;
-    recursive?: boolean;
-    retryDelay?: number;
-}
-
-export interface StatOptions {
-    bigint?: boolean;
-}
-
-// --- Stats Class ---
-export class Stats {
-    dev: number;
-    ino: number;
-    mode: number;
-    nlink: number;
-    uid: number;
-    gid: number;
-    rdev: number;
-    size: number;
-    blksize: number;
-    blocks: number;
-    atimeMs: number;
-    mtimeMs: number;
-    ctimeMs: number;
-    birthtimeMs: number;
-    atime: Date;
-    mtime: Date;
-    ctime: Date;
-    birthtime: Date;
-
-    constructor(stats: NitroStats) {
-        this.dev = stats.dev;
-        this.ino = stats.ino;
-        this.mode = stats.mode;
-        this.nlink = stats.nlink;
-        this.uid = stats.uid;
-        this.gid = stats.gid;
-        this.rdev = stats.rdev;
-        this.size = stats.size;
-        this.blksize = stats.blksize;
-        this.blocks = stats.blocks;
-        this.atimeMs = stats.atimeMs;
-        this.mtimeMs = stats.mtimeMs;
-        this.ctimeMs = stats.ctimeMs;
-        this.birthtimeMs = stats.birthtimeMs;
-
-        // ⚠️ 必须 `Math.round`，不能直接 `new Date(stats.mtimeMs)`。
-        // `mtimeMs` 带亚毫秒小数（实测 1790508365815.8477），而 `new Date(<number>)` 按规范是
-        // **截断**（ToIntegerOrInfinity）⇒ 直接传会比 Node 少 1 ms。Node 的规则实测是
-        // **四舍五入到毫秒**（`os.utime` 受控实验：0.499999→0、0.5→1、0.8477→1）。
-        // 危害路径：`send` 的 ETag = `W/"<size hex>-<mtime.getTime() hex>"` ⇒
-        // `res.sendFile` / `res.download` / `express.static` 的 ETag 与 Node 差 1
-        // （实测 `W/"11-1a0e29d77f8"` vs `W/"11-1a0e29d77f7"`）。
-        // ⚠️ 只有 `Stats` 是四舍五入 —— `BigIntStats` 是**截断**（见该类注释），别统一。
-        this.atime = new Date(Math.round(stats.atimeMs));
-        this.mtime = new Date(Math.round(stats.mtimeMs));
-        this.ctime = new Date(Math.round(stats.ctimeMs));
-        this.birthtime = new Date(Math.round(stats.birthtimeMs));
-    }
-
-    private _checkModeProperty(property: number): boolean {
-        return (this.mode & 0o170000) === property;
-    }
-
-    isDirectory(): boolean {
-        return this._checkModeProperty(0o040000);
-    }
-
-    isFile(): boolean {
-        return this._checkModeProperty(0o100000);
-    }
-
-    isBlockDevice(): boolean {
-        return this._checkModeProperty(0o060000);
-    }
-
-    isCharacterDevice(): boolean {
-        return this._checkModeProperty(0o020000);
-    }
-
-    isSymbolicLink(): boolean {
-        return this._checkModeProperty(0o120000);
-    }
-
-    isFIFO(): boolean {
-        return this._checkModeProperty(0o010000);
-    }
-
-    isSocket(): boolean {
-        return this._checkModeProperty(0o140000);
-    }
-}
-
-// --- BigIntStats Class ---
-export class BigIntStats {
-    dev: bigint;
-    ino: bigint;
-    mode: bigint;
-    nlink: bigint;
-    uid: bigint;
-    gid: bigint;
-    rdev: bigint;
-    size: bigint;
-    blksize: bigint;
-    blocks: bigint;
-    atimeMs: bigint;
-    mtimeMs: bigint;
-    ctimeMs: bigint;
-    birthtimeMs: bigint;
-    atimeNs: bigint;
-    mtimeNs: bigint;
-    ctimeNs: bigint;
-    birthtimeNs: bigint;
-    atime: Date;
-    mtime: Date;
-    ctime: Date;
-    birthtime: Date;
-
-    constructor(stats: NitroStats) {
-        this.dev = BigInt(Math.floor(stats.dev));
-        this.ino = BigInt(Math.floor(stats.ino));
-        this.mode = BigInt(Math.floor(stats.mode));
-        this.nlink = BigInt(Math.floor(stats.nlink));
-        this.uid = BigInt(Math.floor(stats.uid));
-        this.gid = BigInt(Math.floor(stats.gid));
-        this.rdev = BigInt(Math.floor(stats.rdev));
-        this.size = BigInt(Math.floor(stats.size));
-        this.blksize = BigInt(Math.floor(stats.blksize));
-        this.blocks = BigInt(Math.floor(stats.blocks));
-        this.atimeMs = BigInt(Math.floor(stats.atimeMs));
-        this.mtimeMs = BigInt(Math.floor(stats.mtimeMs));
-        this.ctimeMs = BigInt(Math.floor(stats.ctimeMs));
-        this.birthtimeMs = BigInt(Math.floor(stats.birthtimeMs));
-        // Nanoseconds (approximated from ms since native doesn't provide ns directly)
-        this.atimeNs = BigInt(Math.floor(stats.atimeMs)) * 1000000n;
-        this.mtimeNs = BigInt(Math.floor(stats.mtimeMs)) * 1000000n;
-        this.ctimeNs = BigInt(Math.floor(stats.ctimeMs)) * 1000000n;
-        this.birthtimeNs = BigInt(Math.floor(stats.birthtimeMs)) * 1000000n;
-
-        // ⚠️⚠️ `BigIntStats` 与 `Stats` 的取整规则**不同**，别「统一」（Node 实测）：
-        //     Stats.mtime      = new Date(**round**(mtimeMs))
-        //     BigIntStats.mtime = new Date(**trunc**(mtimeMs))  ← 即 new Date(Number(this.mtimeMs))
-        // 同一文件实测（ns=499900000）：`Stats` 得 …500、`BigIntStats` 得 …499。
-        // ⇒ 这里**不能**跟着 `Stats` 改成 `Math.round`（改了就与 Node 差 1 ms）。
-        // 用 `Number(this.xxxMs)` 是刻意的：镜像 Node 的结构（它由 BigInt 的 ms 构造 Date），
-        // 于是 `mtime.getTime() === Number(mtimeMs)` 这条不变量两侧都成立。
-        this.atime = new Date(Number(this.atimeMs));
-        this.mtime = new Date(Number(this.mtimeMs));
-        this.ctime = new Date(Number(this.ctimeMs));
-        this.birthtime = new Date(Number(this.birthtimeMs));
-    }
-
-    private _checkModeProperty(property: number): boolean {
-        return (Number(this.mode) & 0o170000) === property;
-    }
-
-    isDirectory(): boolean {
-        return this._checkModeProperty(0o040000);
-    }
-
-    isFile(): boolean {
-        return this._checkModeProperty(0o100000);
-    }
-
-    isBlockDevice(): boolean {
-        return this._checkModeProperty(0o060000);
-    }
-
-    isCharacterDevice(): boolean {
-        return this._checkModeProperty(0o020000);
-    }
-
-    isSymbolicLink(): boolean {
-        return this._checkModeProperty(0o120000);
-    }
-
-    isFIFO(): boolean {
-        return this._checkModeProperty(0o010000);
-    }
-
-    isSocket(): boolean {
-        return this._checkModeProperty(0o140000);
-    }
-}
-
 // --- Helper Functions ---
 export function getFlags(flag: string | number | undefined): number {
-    if (typeof flag === 'number') return flag;
-    if (flag === undefined) return constants.O_RDONLY;
-    // Basic mapping for common flags
-    switch (flag) {
-        case 'r': return constants.O_RDONLY;
-        case 'r+': return constants.O_RDWR;
-        case 'w': return constants.O_TRUNC | constants.O_CREAT | constants.O_WRONLY;
-        case 'w+': return constants.O_TRUNC | constants.O_CREAT | constants.O_RDWR;
-        case 'a': return constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY;
-        case 'a+': return constants.O_APPEND | constants.O_CREAT | constants.O_RDWR;
-        default: return constants.O_RDONLY;
-    }
+    return getFlagsFromConstants(constants, flag);
 }
 
 function toUnixTimestamp(time: string | number | Date): number {
@@ -386,26 +189,6 @@ function toUnixTimestamp(time: string | number | Date): number {
         return time; // Seconds
     }
     return 0;
-}
-
-export function normalizePath(path: PathLike): string {
-    if (typeof path === 'object' && path instanceof URL) {
-        if (path.protocol !== 'file:') {
-            // Keep other protocols as is (e.g. content://, bookmark://) 
-            // although they aren't technically standard URL protocols in JS engine sometimes.
-            return path.toString();
-        }
-        return decodeURIComponent(path.pathname);
-    }
-    if (typeof path === 'string') {
-        if (path.startsWith('file://')) {
-            return decodeURIComponent(path.substring(7));
-        }
-        if (path.startsWith('file:/')) {
-            return decodeURIComponent(path.substring(5));
-        }
-    }
-    return path as string;
 }
 
 // --- Implementation ---
@@ -813,6 +596,58 @@ export function fstat(fd: number, optionsOrCallback: StatOptions | StatsCallback
             cb(e);
         }
     });
+}
+
+export function statfsSync(path?: PathLike): StatFs;
+export function statfsSync(path: PathLike, options: { bigint: true }): BigIntStatFs;
+export function statfsSync(path: PathLike, options?: StatOptions): StatFs | BigIntStatFs;
+export function statfsSync(path: PathLike = Paths.document || '/', options?: StatOptions): StatFs | BigIntStatFs {
+    const normalizedPath = normalizePath(path);
+    const res = NitroFileSystem.statfs(normalizedPath);
+    if (options?.bigint) {
+        return toBigIntStatFs(res);
+    }
+    return res;
+}
+
+export function statfs(callback: Callback<StatFs>): void;
+export function statfs(path: PathLike, callback: Callback<StatFs>): void;
+export function statfs(path: PathLike, options: { bigint: true }, callback: Callback<BigIntStatFs>): void;
+export function statfs(path: PathLike, options: StatOptions, callback: Callback<StatFs | BigIntStatFs>): void;
+export function statfs(
+    pathOrCallback: PathLike | Callback<StatFs>,
+    optionsOrCallback?: StatOptions | Callback<StatFs> | Callback<BigIntStatFs> | Callback<StatFs | BigIntStatFs>,
+    callback?: Callback<any>
+): void {
+    let targetPath: PathLike;
+    let options: StatOptions | undefined;
+    let cb: Callback<any>;
+
+    if (typeof pathOrCallback === 'function') {
+        targetPath = Paths.document || '/';
+        cb = pathOrCallback;
+    } else if (typeof optionsOrCallback === 'function') {
+        targetPath = pathOrCallback;
+        cb = optionsOrCallback;
+    } else {
+        targetPath = pathOrCallback;
+        options = optionsOrCallback;
+        cb = callback!;
+    }
+
+    const normalizedPath = normalizePath(targetPath);
+    setImmediate(() => {
+        try {
+            const res = statfsSync(normalizedPath, options);
+            cb(null, res);
+        } catch (e: any) {
+            cb(e);
+        }
+    });
+}
+
+export function hashFileSync(path: PathLike, algorithm: HashAlgorithm = 'md5'): string {
+    return NitroFileSystem.hashFileSync(normalizePath(path), algorithm);
 }
 
 export function mkdirSync(path: PathLike, options?: { recursive?: boolean; mode?: number } | number): string | undefined {
@@ -1869,6 +1704,21 @@ export const promises = {
             });
         });
     },
+    statfs: (async (path: PathLike = Paths.document || '/', options?: StatOptions): Promise<StatFs | BigIntStatFs> => {
+        return new Promise((resolve, reject) => {
+            statfs(path, options as any, (err: Error | null, stats?: StatFs | BigIntStatFs) => {
+                if (err) reject(err);
+                else resolve(stats!);
+            });
+        });
+    }) as {
+        (path?: PathLike): Promise<StatFs>;
+        (path: PathLike, options: { bigint: true }): Promise<BigIntStatFs>;
+        (path: PathLike, options?: StatOptions): Promise<StatFs | BigIntStatFs>;
+    },
+    hashFile: async (path: PathLike, algorithm: HashAlgorithm = 'md5'): Promise<string> => {
+        return NitroFileSystem.hashFile(normalizePath(path), algorithm);
+    },
     access: async (path: PathLike, mode: number = constants.F_OK): Promise<void> => {
         return new Promise((resolve, reject) => {
             access(path, mode, (err) => {
@@ -2121,45 +1971,6 @@ export function exists(path: PathLike, callback: (exists: boolean) => void): voi
     });
 }
 
-export class Dirent {
-    name: string;
-    private _mode: number;
-
-    constructor(name: string, mode: number) {
-        this.name = name;
-        this._mode = mode;
-    }
-
-    isDirectory(): boolean {
-        return (this._mode & 0o040000) === 0o040000;
-    }
-
-    isFile(): boolean {
-        return (this._mode & 0o100000) === 0o100000;
-    }
-
-    isBlockDevice(): boolean {
-        return (this._mode & 0o060000) === 0o060000;
-    }
-
-    isCharacterDevice(): boolean {
-        return (this._mode & 0o020000) === 0o020000;
-    }
-
-    isSymbolicLink(): boolean {
-        return (this._mode & 0o120000) === 0o120000;
-    }
-
-    isFIFO(): boolean {
-        return (this._mode & 0o010000) === 0o010000;
-    }
-
-    isSocket(): boolean {
-        return (this._mode & 0o140000) === 0o140000;
-    }
-}
-
-
 export function readdirSync(path: PathLike, options?: { encoding?: BufferEncoding | null; withFileTypes?: boolean } | BufferEncoding | null): string[] | Dirent[] {
     const normalizedPath = normalizePath(path);
     const files = NitroFileSystem.readdir(normalizedPath);
@@ -2284,6 +2095,9 @@ export default {
     rmdirSync,
     stat,
     statSync,
+    statfs,
+    statfsSync,
+    hashFileSync,
     symlink,
     symlinkSync,
     truncate,
@@ -2311,6 +2125,7 @@ export default {
     Stats,
     BigIntStats,
     Dirent,
+    Dir,
     ReadStream,
     WriteStream,
     FSWatcher,
@@ -2321,7 +2136,11 @@ export default {
     getTempPath,
     pickFiles,
     pickDirectory,
-    // Path constants
+    // Path constants & URI helpers
     Paths,
     FileProtectionKeys,
+    bundleUri,
+    toFileUri,
+    normalizePath,
+    getFlags,
 };

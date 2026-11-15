@@ -1,8 +1,11 @@
 #import "NitroFileSystemUtils.h"
 #import "../cpp/rust_c_file_system.h"
 #import <Foundation/Foundation.h>
+#include <cerrno>
 #include <fcntl.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 // UIKit 与 UniformTypeIdentifiers 只在 iOS 存在；macOS 上没有 UIDocumentPicker，
 // picker 系列在 macOS 走 reject 实现（见文件末尾）。TARGET_OS_IOS 由
@@ -641,6 +644,80 @@ std::unordered_map<std::string, std::string> getFileProtectionKeysIOS() {
         {"CompleteUntilFirstUserAuthentication", std::string(NSFileProtectionCompleteUntilFirstUserAuthentication.UTF8String)},
         {"None", std::string(NSFileProtectionNone.UTF8String)}
     };
+}
+
+int statfsIOS(const std::string &uri, StatFsResult *out) {
+    if (!out || uri.empty()) {
+        errno = ENOENT;
+        return -1;
+    }
+    @autoreleasepool {
+        BOOL isBookmark = (uri.rfind("bookmark://", 0) == 0);
+        NSURL *url = isBookmark ? urlFromBookmarkUri(uri) : urlFromAnyUri(uri);
+        if (!url) {
+            errno = ENOENT;
+            return -1;
+        }
+        BOOL accessing = isBookmark ? [url startAccessingSecurityScopedResource] : NO;
+        const char *fsPath = url.fileSystemRepresentation;
+        if (!fsPath || fsPath[0] == '\0') {
+            if (accessing) [url stopAccessingSecurityScopedResource];
+            errno = ENOENT;
+            return -1;
+        }
+
+        struct statvfs vfs{};
+        if (statvfs(fsPath, &vfs) != 0) {
+            int savedErrno = errno;
+            if (accessing) [url stopAccessingSecurityScopedResource];
+            errno = savedErrno;
+            return -1;
+        }
+
+        struct statfs sfs{};
+        double fsType = (::statfs(fsPath, &sfs) == 0) ? static_cast<double>(sfs.f_type) : 0.0;
+
+        double blockSize = static_cast<double>(vfs.f_frsize ? vfs.f_frsize : vfs.f_bsize);
+        double totalBytes = static_cast<double>(vfs.f_blocks) * blockSize;
+        double freeBytes = static_cast<double>(vfs.f_bfree) * blockSize;
+        double availableBytes = static_cast<double>(vfs.f_bavail) * blockSize;
+
+        NSNumber *totalNum = nil;
+        if ([url getResourceValue:&totalNum forKey:NSURLVolumeTotalCapacityKey error:nil] && totalNum != nil) {
+            totalBytes = [totalNum doubleValue];
+        }
+
+        NSNumber *freeNum = nil;
+        if ([url getResourceValue:&freeNum forKey:NSURLVolumeAvailableCapacityKey error:nil] && freeNum != nil) {
+            freeBytes = [freeNum doubleValue];
+        }
+
+        if (@available(iOS 11.0, macOS 10.13, *)) {
+            NSNumber *importantNum = nil;
+            if ([url getResourceValue:&importantNum forKey:NSURLVolumeAvailableCapacityForImportantUsageKey error:nil] && importantNum != nil) {
+                double imp = [importantNum doubleValue];
+                if (imp >= 0) {
+                    availableBytes = imp;
+                }
+            }
+        }
+
+        if (accessing) {
+            [url stopAccessingSecurityScopedResource];
+        }
+
+        out->totalBytes = totalBytes;
+        out->availableBytes = availableBytes;
+        out->freeBytes = freeBytes;
+        out->type = fsType;
+        out->bsize = blockSize;
+        out->blocks = static_cast<double>(vfs.f_blocks);
+        out->bfree = static_cast<double>(vfs.f_bfree);
+        out->bavail = static_cast<double>(vfs.f_bavail);
+        out->files = static_cast<double>(vfs.f_files);
+        out->ffree = static_cast<double>(vfs.f_ffree);
+        return 0;
+    }
 }
 
 } // namespace fs

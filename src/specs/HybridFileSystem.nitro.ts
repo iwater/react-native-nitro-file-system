@@ -47,6 +47,19 @@ export interface PickedDirectory {
     bookmark?: string;
 }
 
+export interface StatFs {
+    totalBytes: number;
+    availableBytes: number;
+    freeBytes: number;
+    type: number;
+    bsize: number;
+    blocks: number;
+    bfree: number;
+    bavail: number;
+    files: number;
+    ffree: number;
+}
+
 export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c++' }> {
     // Core FS operations
     open(path: string, flags: number, mode: number): number;
@@ -110,11 +123,17 @@ export interface HybridFileSystem extends HybridObject<{ ios: 'c++', android: 'c
     readv(fd: number, buffers: ArrayBuffer[], position: number): number;
     writev(fd: number, buffers: ArrayBuffer[], position: number): number;
 
+    // Disk space & streaming file hash
+    statfs(path: string): StatFs;
+    hashFile(path: string, algorithm: string): Promise<string>;
+    hashFileSync(path: string, algorithm: string): string;
+
     // Picker API
     pickFiles(options: FilePickerOptions): Promise<PickedFile[]>;
     pickDirectory(options?: DirectoryPickerOptions): Promise<PickedDirectory>;
 
     // Path constants (getters)
+    readonly bundleUri: string;
     readonly cachesDirectoryPath: string;
     readonly documentDirectoryPath: string;
     readonly downloadDirectoryPath: string;

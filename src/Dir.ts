@@ -1,22 +1,7 @@
 import { HybridDirIterator } from './specs/HybridDirIterator.nitro';
+import { Dirent } from './shared';
 
-export class Dirent {
-    constructor(public name: string) { }
-
-    isFile(): boolean {
-        // TODO: Need type info from native layer
-        return false;
-    }
-    isDirectory(): boolean {
-        // TODO: Need type info from native layer
-        return false;
-    }
-    isBlockDevice(): boolean { return false; }
-    isCharacterDevice(): boolean { return false; }
-    isSymbolicLink(): boolean { return false; }
-    isFIFO(): boolean { return false; }
-    isSocket(): boolean { return false; }
-}
+export { Dirent };
 
 export class Dir {
     constructor(private internal: HybridDirIterator, public path: string) { }

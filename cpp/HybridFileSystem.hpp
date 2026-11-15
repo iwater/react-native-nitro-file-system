@@ -20,6 +20,7 @@ public:
       : HybridObject("NitroNodeFileSystem"), HybridHybridFileSystemSpec() {}
 
   // Properties
+  std::string getBundleUri() override;
   std::string getCachesDirectoryPath() override;
   std::string getDocumentDirectoryPath() override;
   std::string getDownloadDirectoryPath() override;
@@ -111,6 +112,13 @@ public:
                 const std::vector<std::shared_ptr<ArrayBuffer>> &buffers,
                 double position) override;
 
+  // Disk space & streaming file hash
+  StatFs statfs(const std::string &path) override;
+  std::shared_ptr<Promise<std::string>> hashFile(const std::string &path,
+                                                 const std::string &algorithm) override;
+  std::string hashFileSync(const std::string &path,
+                           const std::string &algorithm) override;
+
   std::string getBookmark(const std::string &path) override;
   std::string resolveBookmark(const std::string &bookmark) override;
   std::string getTempPath() override;
@@ -122,7 +130,7 @@ public:
 private:
   std::string normalizePath(const std::string &path);
 #ifdef __ANDROID__
-  void copyAssetRecursive(const std::string& assetPath, const std::string& destPath, bool recursive, bool force);
+  void copyAssetRecursive(const std::string& assetPath, const std::string& destPath, bool recursive, bool force, bool errorOnExist);
 #endif
 };
 

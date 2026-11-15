@@ -1,15 +1,28 @@
 #include "HybridFileSystem.hpp"
+#include "HashDigest.hpp"
 #include "HybridDirIterator.hpp"
 #include "HybridFileWatcher.hpp"
 #include "rust_c_file_system.h"
+#include <array>
 #include <cerrno>
 #include <cstdio>
+#include <exception>
 #include <fcntl.h>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <sys/stat.h>
-#include <stdexcept>
-#include <exception>
+#include <thread>
+#include <unistd.h>
+
+#ifndef __APPLE__
+#include <sys/statvfs.h>
+#if defined(__ANDROID__)
+#include <sys/vfs.h>
+#elif defined(__linux__)
+#include <sys/statfs.h>
+#endif
+#endif
 
 #ifdef __ANDROID__
 #include <jni.h>
@@ -71,16 +84,73 @@ std::string getAssetPath(const std::string& path) {
     return path.substr(8);
 }
 
+static std::string cleanAssetRelPath(const std::string& assetPath) {
+    std::string clean = assetPath;
+    while (!clean.empty() && clean.front() == '/') {
+        clean.erase(clean.begin());
+    }
+    while (!clean.empty() && clean.back() == '/') {
+        clean.pop_back();
+    }
+    return clean;
+}
+
+static std::vector<std::string> listAssetsJava(const std::string& cleanPath) {
+    std::vector<std::string> entries;
+    JNIEnv *env = getJNIEnv();
+    if (!env) {
+        return entries;
+    }
+    jclass cls = env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+    if (!cls) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return entries;
+    }
+    jmethodID mid = env->GetStaticMethodID(cls, "listAssets", "(Ljava/lang/String;)[Ljava/lang/String;");
+    if (mid) {
+        jstring jPath = env->NewStringUTF(cleanPath.c_str());
+        jobjectArray jArr = (jobjectArray)env->CallStaticObjectMethod(cls, mid, jPath);
+        env->DeleteLocalRef(jPath);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            jArr = nullptr;
+        }
+        if (jArr) {
+            jsize len = env->GetArrayLength(jArr);
+            entries.reserve(static_cast<size_t>(len));
+            for (jsize i = 0; i < len; i++) {
+                jstring js = (jstring)env->GetObjectArrayElement(jArr, i);
+                if (js) {
+                    const char *str = env->GetStringUTFChars(js, nullptr);
+                    if (str) {
+                        entries.emplace_back(str);
+                        env->ReleaseStringUTFChars(js, str);
+                    }
+                    env->DeleteLocalRef(js);
+                }
+            }
+            env->DeleteLocalRef(jArr);
+        }
+    } else if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+    env->DeleteLocalRef(cls);
+    return entries;
+}
+
 std::shared_ptr<ArrayBuffer> readAssetBuffer(const std::string& assetPath) {
     if (gAssetManager == nullptr) {
+        rn_fs_set_errno(EIO);
         throw std::runtime_error("AssetManager not initialized. Did you forget to call NitroFileSystemUtils.initialize()?");
     }
-    
-    AAsset* asset = AAssetManager_open(gAssetManager, assetPath.c_str(), AASSET_MODE_BUFFER);
+
+    std::string clean = cleanAssetRelPath(assetPath);
+    AAsset* asset = AAssetManager_open(gAssetManager, clean.c_str(), AASSET_MODE_BUFFER);
     if (!asset) {
+        rn_fs_set_errno(ENOENT);
         throw std::runtime_error("Could not open asset: " + assetPath);
     }
-    
+
     off_t size = AAsset_getLength(asset);
     if (size <= 0) {
         AAsset_close(asset);
@@ -93,9 +163,10 @@ std::shared_ptr<ArrayBuffer> readAssetBuffer(const std::string& assetPath) {
 
     if (readCount < 0) {
         delete[] rawData;
+        rn_fs_set_errno(EIO);
         throw std::runtime_error("Failed to read asset: " + assetPath);
     }
-    
+
     auto buffer = ArrayBuffer::copy(rawData, readCount);
     delete[] rawData;
     return buffer;
@@ -103,45 +174,57 @@ std::shared_ptr<ArrayBuffer> readAssetBuffer(const std::string& assetPath) {
 
 Stats statAsset(const std::string& assetPath) {
     if (gAssetManager == nullptr) {
-         throw std::runtime_error("AssetManager not initialized.");
+        rn_fs_set_errno(EIO);
+        throw std::runtime_error("AssetManager not initialized.");
     }
-    AAsset* asset = AAssetManager_open(gAssetManager, assetPath.c_str(), AASSET_MODE_BUFFER);
+    std::string clean = cleanAssetRelPath(assetPath);
+    AAsset* asset = AAssetManager_open(gAssetManager, clean.c_str(), AASSET_MODE_BUFFER);
     if (!asset) {
-        // Fallback: check if it's a directory by opening it as a dir
-        AAssetDir* dir = AAssetManager_openDir(gAssetManager, assetPath.c_str());
-        if (dir) {
-            bool hasEntries = AAssetDir_getNextFileName(dir) != nullptr;
-            AAssetDir_close(dir);
-            if (hasEntries || assetPath.empty() || assetPath == ".") {
-                // Return a directory stat
-                return Stats(0, 0, S_IFDIR | 0555, 1, 0, 0, 0, 0, 4096, 0, 0, 0, 0, 0);
-            }
+        // Fallback: check via Java AssetManager.list() so directories containing only subdirectories are recognized.
+        if (clean.empty() || clean == "." || !listAssetsJava(clean).empty()) {
+            return Stats(0, 0, S_IFDIR | 0555, 1, 0, 0, 0, 0, 4096, 0, 0, 0, 0, 0);
         }
+        rn_fs_set_errno(ENOENT);
         throw std::runtime_error("Asset not found: " + assetPath);
     }
-    
+
     off_t size = AAsset_getLength(asset);
     AAsset_close(asset);
-    
+
     // mode: S_IFREG (regular file) | S_IRUSR (read access)
     return Stats(0, 0, S_IFREG | 0444, 1, 0, 0, 0, static_cast<double>(size), 4096, 0, 0, 0, 0, 0);
 }
 
 std::vector<std::string> readdirAsset(const std::string& assetPath) {
     if (gAssetManager == nullptr) {
+        rn_fs_set_errno(EIO);
         throw std::runtime_error("AssetManager not initialized.");
     }
-    AAssetDir* dir = AAssetManager_openDir(gAssetManager, assetPath.c_str());
-    if (!dir) {
+    std::string clean = cleanAssetRelPath(assetPath);
+    // Reject files with ENOTDIR just like POSIX scandir
+    if (!clean.empty() && clean != ".") {
+        AAsset* asset = AAssetManager_open(gAssetManager, clean.c_str(), AASSET_MODE_BUFFER);
+        if (asset) {
+            AAsset_close(asset);
+            rn_fs_set_errno(ENOTDIR);
+            throw std::runtime_error("Asset path is not a directory: " + assetPath);
+        }
+    }
+
+    std::vector<std::string> entries = listAssetsJava(clean);
+    if (entries.empty() && !clean.empty() && clean != ".") {
+        rn_fs_set_errno(ENOENT);
         throw std::runtime_error("Could not open asset directory: " + assetPath);
     }
-    
-    std::vector<std::string> entries;
-    while (const char* entryName = AAssetDir_getNextFileName(dir)) {
-        entries.push_back(entryName);
-    }
-    AAssetDir_close(dir);
     return entries;
+}
+
+void accessAsset(const std::string& assetPath, int mode) {
+    if ((mode & W_OK) != 0) {
+        rn_fs_set_errno(EACCES);
+        throw std::runtime_error("access failed (read-only asset): " + assetPath);
+    }
+    (void)statAsset(assetPath);
 }
 #endif
 
@@ -275,6 +358,11 @@ void HybridFileSystem::access(const std::string &rawPath, double mode) {
   std::string path = normalizePath(rawPath);
 
 #ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    accessAsset(getAssetPath(path), static_cast<int>(mode));
+    return;
+  }
+
   if (path.find("content://") == 0) {
     JNIEnv *env = getJNIEnv();
     if (env) {
@@ -544,6 +632,10 @@ Stats HybridFileSystem::lstat(const std::string &rawPath) {
   std::string path = normalizePath(rawPath);
 
 #ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    return statAsset(getAssetPath(path));
+  }
+
   if (path.find("content://") == 0) {
     // For content URIs, lstat is equivalent to stat
     return stat(path);
@@ -763,7 +855,7 @@ void HybridFileSystem::cp(const std::string &rawSrc, const std::string &rawDest,
 
 #ifdef __ANDROID__
   if (isAssetPath(src)) {
-    copyAssetRecursive(getAssetPath(src), dest, recursive, force);
+    copyAssetRecursive(getAssetPath(src), dest, recursive, force, errorOnExist);
     return;
   }
 #endif
@@ -1125,14 +1217,92 @@ std::shared_ptr<HybridHybridFileWatcherSpec> HybridFileSystem::watch(
   return std::make_shared<HybridFileWatcher>(path, onChange);
 }
 
+static int hexVal(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+static std::string percentDecode(const std::string &input) {
+  std::string out;
+  out.reserve(input.size());
+  for (size_t i = 0; i < input.size(); ++i) {
+    if (input[i] == '%' && i + 2 < input.size()) {
+      int hi = hexVal(input[i + 1]);
+      int lo = hexVal(input[i + 2]);
+      if (hi >= 0 && lo >= 0) {
+        out.push_back(static_cast<char>((hi << 4) | lo));
+        i += 2;
+        continue;
+      }
+    }
+    out.push_back(input[i]);
+  }
+  return out;
+}
+
+static bool isUriUnreserved(unsigned char c) {
+  if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+    return true;
+  }
+  switch (c) {
+  case '/':
+  case '-':
+  case '_':
+  case '.':
+  case '!':
+  case '~':
+  case '*':
+  case '\'':
+  case '(':
+  case ')':
+    return true;
+  default:
+    return false;
+  }
+}
+
+static std::string percentEncodePath(const std::string &path) {
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  std::string out;
+  out.reserve(path.size());
+  for (unsigned char c : path) {
+    if (isUriUnreserved(c)) {
+      out.push_back(static_cast<char>(c));
+    } else {
+      out.push_back('%');
+      out.push_back(kHex[(c >> 4) & 0x0f]);
+      out.push_back(kHex[c & 0x0f]);
+    }
+  }
+  return out;
+}
+
+std::string HybridFileSystem::getBundleUri() {
+#ifdef __ANDROID__
+  return "asset://";
+#else
+  std::string bundlePath = this->getMainBundlePath();
+  if (bundlePath.empty()) {
+    return "";
+  }
+  std::string normalized = (bundlePath[0] == '/') ? bundlePath : ("/" + bundlePath);
+  if (normalized.back() != '/') {
+    normalized.push_back('/');
+  }
+  return "file://" + percentEncodePath(normalized);
+#endif
+}
+
 std::string HybridFileSystem::normalizePath(const std::string &path) {
   if (path.find("file://") == 0) {
-    return path.substr(7);
+    return percentDecode(path.substr(7));
   } else if (path.find("file:/") == 0) {
-    return path.substr(5);
+    return percentDecode(path.substr(5));
   } else if (path.find("asset://") == 0) {
 #ifdef __APPLE__
-    std::string relPath = path.substr(8);
+    std::string relPath = percentDecode(path.substr(8));
     std::string bundlePath = this->getMainBundlePath();
     if (relPath.empty() || relPath == "/")
       return bundlePath;
@@ -1447,27 +1617,295 @@ extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_node_1fs_NitroFileSyste
 #endif
 
 #ifdef __ANDROID__
-void HybridFileSystem::copyAssetRecursive(const std::string& assetPath, const std::string& destPath, bool recursive, bool force) {
+void HybridFileSystem::copyAssetRecursive(const std::string& assetPath, const std::string& destPath, bool recursive, bool force, bool errorOnExist) {
   Stats s = statAsset(assetPath);
   if (static_cast<int>(s.mode) & S_IFDIR) {
     if (!recursive) {
+      rn_fs_set_errno(EISDIR);
       throw std::runtime_error("EISDIR: illegal operation on a directory, copy asset://" + assetPath);
     }
+    RNStats destStat{};
+    if (rn_fs_lstat(destPath.c_str(), &destStat) == 0 && !S_ISDIR(destStat.mode)) {
+      if (!force) {
+        if (errorOnExist) {
+          rn_fs_set_errno(EEXIST);
+          throw std::runtime_error("Destination already exists: " + destPath);
+        }
+        return;
+      }
+      if (rn_fs_unlink(destPath.c_str()) != 0) {
+        throw std::runtime_error("Failed to replace destination: " + destPath);
+      }
+    }
     this->mkdir(destPath, 0755, true);
-    
+
     std::vector<std::string> entries = readdirAsset(assetPath);
+    std::string cleanParent = cleanAssetRelPath(assetPath);
     for (const auto& entry : entries) {
-      std::string subAsset = assetPath.empty() ? entry : assetPath + "/" + entry;
+      std::string subAsset = cleanParent.empty() ? entry : cleanParent + "/" + entry;
       std::string subDest = destPath;
-      if (subDest.back() != '/') subDest += "/";
+      if (!subDest.empty() && subDest.back() != '/') subDest += "/";
       subDest += entry;
-      copyAssetRecursive(subAsset, subDest, recursive, force);
+      copyAssetRecursive(subAsset, subDest, recursive, force, errorOnExist);
     }
   } else {
+    RNStats destStat{};
+    if (rn_fs_lstat(destPath.c_str(), &destStat) == 0) {
+      if (!force) {
+        if (errorOnExist) {
+          rn_fs_set_errno(EEXIST);
+          throw std::runtime_error("Destination already exists: " + destPath);
+        }
+        return;
+      }
+    }
     auto buffer = readAssetBuffer(assetPath);
     this->writeFile(destPath, buffer);
   }
 }
 #endif
+
+StatFs HybridFileSystem::statfs(const std::string &rawPath) {
+  std::string path = normalizePath(rawPath);
+  if (path.empty()) {
+    rn_fs_set_errno(ENOENT);
+    throw std::runtime_error("statfs failed: empty path");
+  }
+#ifdef __APPLE__
+  ::nitro::fs::StatFsResult res{};
+  if (::nitro::fs::statfsIOS(path, &res) != 0) {
+    int err = errno ? errno : ENOENT;
+    rn_fs_set_errno(err);
+    throw std::runtime_error("statfs failed: " + path);
+  }
+  return StatFs(res.totalBytes, res.availableBytes, res.freeBytes,
+                res.type, res.bsize, res.blocks, res.bfree, res.bavail,
+                res.files, res.ffree);
+#else
+#ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    (void)statAsset(getAssetPath(path));
+    std::string bundlePath = getMainBundlePath();
+    if (bundlePath.empty()) {
+      rn_fs_set_errno(ENOENT);
+      throw std::runtime_error("statfs failed: " + path);
+    }
+    path = bundlePath;
+  } else if (path.rfind("content://", 0) == 0) {
+    JNIEnv *env = getJNIEnv();
+    bool exists = false;
+    if (env) {
+      jclass cls = env->FindClass("com/margelo/nitro/node_fs/NitroFileSystemUtils");
+      if (cls) {
+        jmethodID mid = env->GetStaticMethodID(cls, "existsContentUri", "(Ljava/lang/String;)Z");
+        if (mid) {
+          jstring jUri = env->NewStringUTF(path.c_str());
+          exists = env->CallStaticBooleanMethod(cls, mid, jUri);
+          env->DeleteLocalRef(jUri);
+        }
+        env->DeleteLocalRef(cls);
+      }
+    }
+    if (!exists) {
+      rn_fs_set_errno(ENOENT);
+      throw std::runtime_error("statfs failed: " + path);
+    }
+    std::string fallback = getAndroidDirectoryPath("documents");
+    path = fallback.empty() ? "/" : fallback;
+  }
+#endif
+#if defined(__ANDROID__) && (__ANDROID_API__ >= 21)
+  struct statvfs64 vfs{};
+  if (statvfs64(path.c_str(), &vfs) != 0) {
+    rn_fs_set_errno(errno);
+    throw std::runtime_error("statfs failed: " + path);
+  }
+#else
+  struct statvfs vfs{};
+  if (statvfs(path.c_str(), &vfs) != 0) {
+    rn_fs_set_errno(errno);
+    throw std::runtime_error("statfs failed: " + path);
+  }
+#endif
+  double fsType = 0;
+#if defined(__ANDROID__) && (__ANDROID_API__ >= 21)
+  struct statfs64 sfs{};
+  if (statfs64(path.c_str(), &sfs) == 0) {
+    fsType = static_cast<double>(sfs.f_type);
+  }
+#elif defined(__linux__) || defined(__ANDROID__)
+  struct statfs sfs{};
+  if (::statfs(path.c_str(), &sfs) == 0) {
+    fsType = static_cast<double>(sfs.f_type);
+  }
+#endif
+  double blockSize = static_cast<double>(vfs.f_frsize ? vfs.f_frsize : vfs.f_bsize);
+  double totalBytes = static_cast<double>(vfs.f_blocks) * blockSize;
+  double availableBytes = static_cast<double>(vfs.f_bavail) * blockSize;
+  double freeBytes = static_cast<double>(vfs.f_bfree) * blockSize;
+  return StatFs(
+    totalBytes,
+    availableBytes,
+    freeBytes,
+    fsType,
+    blockSize,
+    static_cast<double>(vfs.f_blocks),
+    static_cast<double>(vfs.f_bfree),
+    static_cast<double>(vfs.f_bavail),
+    static_cast<double>(vfs.f_files),
+    static_cast<double>(vfs.f_ffree)
+  );
+#endif
+}
+
+namespace {
+struct FdGuard {
+  int fd;
+  explicit FdGuard(int f) : fd(f) {}
+  ~FdGuard() {
+    if (fd >= 0) {
+      rn_fs_close(fd);
+    }
+  }
+  FdGuard(const FdGuard &) = delete;
+  FdGuard &operator=(const FdGuard &) = delete;
+};
+
+#ifdef __ANDROID__
+struct AssetGuard {
+  AAsset *asset;
+  explicit AssetGuard(AAsset *a) : asset(a) {}
+  ~AssetGuard() {
+    if (asset != nullptr) {
+      AAsset_close(asset);
+    }
+  }
+  AssetGuard(const AssetGuard &) = delete;
+  AssetGuard &operator=(const AssetGuard &) = delete;
+};
+
+std::string hashAssetStream(AAsset *asset, const std::string &algorithm) {
+  AssetGuard guard(asset);
+  ::nitro::fs::StreamingHasher hasher(algorithm);
+  std::array<uint8_t, 65536> buf{};
+  while (true) {
+    int bytesRead = AAsset_read(asset, buf.data(), buf.size());
+    if (bytesRead < 0) {
+      throw std::runtime_error("Failed to read asset during hashFile");
+    }
+    if (bytesRead == 0) {
+      break;
+    }
+    hasher.update(buf.data(), static_cast<size_t>(bytesRead));
+  }
+  return hasher.finalizeHex();
+}
+#endif
+
+std::string hashFdStream(int fd, const std::string &algorithm) {
+  FdGuard guard(fd);
+  ::nitro::fs::StreamingHasher hasher(algorithm);
+  std::array<uint8_t, 65536> buf{};
+  while (true) {
+    int64_t bytesRead = rn_fs_read(fd, buf.data(), buf.size(), -1);
+    if (bytesRead < 0) {
+      throw std::runtime_error("Failed to read file during hashFile");
+    }
+    if (bytesRead == 0) {
+      break;
+    }
+    hasher.update(buf.data(), static_cast<size_t>(bytesRead));
+  }
+  return hasher.finalizeHex();
+}
+} // namespace
+
+#ifdef __ANDROID__
+AAsset *openAssetForHash(const std::string &path, const std::string &rawPath) {
+  if (gAssetManager == nullptr) {
+    rn_fs_set_errno(EIO);
+    throw std::runtime_error("AssetManager not initialized.");
+  }
+  std::string clean = cleanAssetRelPath(getAssetPath(path));
+  AAsset *asset = AAssetManager_open(gAssetManager, clean.c_str(), AASSET_MODE_STREAMING);
+  if (!asset) {
+    if (clean.empty() || clean == "." || !listAssetsJava(clean).empty()) {
+      rn_fs_set_errno(EISDIR);
+      throw std::runtime_error("EISDIR: illegal operation on a directory, open '" + rawPath + "'");
+    }
+    rn_fs_set_errno(ENOENT);
+    throw std::runtime_error("ENOENT: no such file or directory, open '" + rawPath + "'");
+  }
+  return asset;
+}
+#endif
+
+int openFdForHash(HybridFileSystem &fs, const std::string &path) {
+  int fd = static_cast<int>(fs.open(path, O_RDONLY, 0));
+  if (fd < 0) {
+    throw std::runtime_error("hashFile failed to open: " + path);
+  }
+  RNStats st{};
+  if (rn_fs_fstat(fd, &st) == 0 && S_ISDIR(st.mode)) {
+    rn_fs_close(fd);
+    rn_fs_set_errno(EISDIR);
+    throw std::runtime_error("EISDIR: illegal operation on a directory, read");
+  }
+  return fd;
+}
+
+void validateHashAlgorithm(const std::string &algorithm) {
+  if (!::nitro::fs::StreamingHasher::isSupported(algorithm)) {
+    rn_fs_set_errno(EINVAL);
+    throw std::invalid_argument("Unsupported hash algorithm: " + algorithm);
+  }
+}
+
+std::string HybridFileSystem::hashFileSync(const std::string &rawPath,
+                                           const std::string &algorithm) {
+  validateHashAlgorithm(algorithm);
+  std::string path = normalizePath(rawPath);
+
+#ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    return hashAssetStream(openAssetForHash(path, rawPath), algorithm);
+  }
+#endif
+
+  return hashFdStream(openFdForHash(*this, path), algorithm);
+}
+
+std::shared_ptr<Promise<std::string>>
+HybridFileSystem::hashFile(const std::string &rawPath,
+                           const std::string &algorithm) {
+  validateHashAlgorithm(algorithm);
+  std::string path = normalizePath(rawPath);
+
+#ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    AAsset *asset = openAssetForHash(path, rawPath);
+    auto promise = Promise<std::string>::create();
+    std::thread([promise, asset, algorithm]() {
+      try {
+        promise->resolve(hashAssetStream(asset, algorithm));
+      } catch (...) {
+        promise->reject(std::current_exception());
+      }
+    }).detach();
+    return promise;
+  }
+#endif
+
+  int fd = openFdForHash(*this, path);
+  auto promise = Promise<std::string>::create();
+  std::thread([promise, fd, algorithm]() {
+    try {
+      promise->resolve(hashFdStream(fd, algorithm));
+    } catch (...) {
+      promise->reject(std::current_exception());
+    }
+  }).detach();
+  return promise;
+}
 
 } // namespace margelo::nitro::node_fs

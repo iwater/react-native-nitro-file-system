@@ -78,5 +78,20 @@ void stopAccessingBookmark(void *token);
 std::string getDirectoryPathIOS(const std::string& type);
 std::unordered_map<std::string, std::string> getFileProtectionKeysIOS();
 
+struct StatFsResult {
+  double totalBytes;
+  double availableBytes;
+  double freeBytes;
+  double type;
+  double bsize;
+  double blocks;
+  double bfree;
+  double bavail;
+  double files;
+  double ffree;
+};
+
+int statfsIOS(const std::string &uri, StatFsResult *out);
+
 } // namespace fs
 } // namespace nitro

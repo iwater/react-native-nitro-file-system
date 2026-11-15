@@ -604,5 +604,22 @@ public class NitroFileSystemUtils {
         return dir != null ? dir.getAbsolutePath() : "";
     }
 
+    public static String[] listAssets(String assetPath) {
+        if (context == null) return null;
+        try {
+            String cleanPath = assetPath == null ? "" : assetPath;
+            while (cleanPath.startsWith("/")) {
+                cleanPath = cleanPath.substring(1);
+            }
+            while (cleanPath.endsWith("/")) {
+                cleanPath = cleanPath.substring(0, cleanPath.length() - 1);
+            }
+            return context.getAssets().list(cleanPath);
+        } catch (Exception e) {
+            Log.e(TAG, "listAssets failed: " + assetPath, e);
+            return null;
+        }
+    }
+
     private static native void nSetAssetManager(AssetManager assetManager);
 }
