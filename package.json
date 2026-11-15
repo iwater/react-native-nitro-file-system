@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-file-system",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "High-performance Node.js-compatible file system (fs) for React Native, powered by Nitro (JSI/C++) for zero-copy binary data handling and near-native speeds.",
   "repository": {
     "type": "git",
@@ -10,7 +10,25 @@
   "type": "module",
   "main": "lib/index.js",
   "module": "lib/index.js",
+  "browser": "./lib/index.web.js",
   "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "browser": "./lib/index.web.js",
+      "react-native": "./lib/index.js",
+      "default": "./lib/index.js"
+    },
+    "./rnfs-compat": {
+      "types": "./lib/rnfs-compat.d.ts",
+      "browser": "./lib/rnfs-compat.web.js",
+      "react-native": "./lib/rnfs-compat.js",
+      "default": "./lib/rnfs-compat.js"
+    },
+    "./package.json": "./package.json",
+    "./nitro.json": "./nitro.json",
+    "./lib/*": "./lib/*"
+  },
   "scripts": {
     "one": "npm run copy-clib && npm run build",
     "build": "npx nitrogen@0.35.0 && tsc",
@@ -35,7 +53,7 @@
   "peerDependencies": {
     "react": "*",
     "react-native": "*",
-    "react-native-nitro-modules": "^0.35.0"
+    "react-native-nitro-modules": ">=0.35.0 <0.38"
   },
   "devDependencies": {
     "@types/node": "^18.19.130",
