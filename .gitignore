@@ -5,3 +5,5 @@ lib
 .DS_Store
 .git
 .yarn
+mac/
+package-lock.json
