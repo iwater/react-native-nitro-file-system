@@ -1855,7 +1855,7 @@ export const promises = {
 interface StatWatcher {
     listeners: Array<(curr: Stats, prev: Stats) => void>;
     interval: number;
-    timer: NodeJS.Timeout;
+    timer: any;
     prev: Stats | null;
 }
 
@@ -1929,13 +1929,14 @@ export function watchFile(filename: PathLike, options: { interval?: number; pers
             });
         }, interval);
 
-        watcher = {
+        const newWatcher: StatWatcher = {
             listeners: [cb],
             interval,
             timer,
             prev: prevStats
         };
-        statWatchers.set(path, watcher);
+        watcher = newWatcher;
+        statWatchers.set(path, newWatcher);
     }
 }
 
