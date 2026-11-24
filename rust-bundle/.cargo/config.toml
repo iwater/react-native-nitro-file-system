@@ -1,0 +1,3 @@
+# Test threads run serially by default for consistent FFI/watcher state.
+[env]
+RUST_TEST_THREADS = "1"
