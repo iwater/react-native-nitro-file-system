@@ -19,7 +19,8 @@
     },
     "cxx": {
         "extraIncludeDirs": [
-            "./cpp"
+            "./cpp",
+            "./rust-bundle/include"
         ],
         "extraLibs": [
             "rn_file_system"

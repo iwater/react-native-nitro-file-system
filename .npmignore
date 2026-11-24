@@ -3,6 +3,7 @@ android/.cxx
 android/.gradle
 ios/build
 ios/DerivedData
+rust-bundle/
 *.tgz
 node_modules
 .DS_Store

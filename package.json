@@ -33,11 +33,12 @@
     "one": "npm run copy-clib && npm run build",
     "build": "npx nitrogen@0.35.0 && tsc",
     "test": "jest",
+    "test:rust": "cd rust-bundle && cargo test -- --test-threads=1",
     "prepublishOnly": "npm run build",
     "copy-clib": "npm run copy-clib-android && npm run copy-clib-ios && npm run copy-clib-mac",
-    "copy-clib-ios": "rm -rf ios/Frameworks/RustFileSystem.xcframework && cp -R ../rust_c_file_system_lib/target/xcframework/RustFileSystem.xcframework ios/Frameworks/",
-    "copy-clib-android": "mkdir -p android/libs/arm64-v8a android/libs/armeabi-v7a android/libs/x86 android/libs/x86_64 && cp ../rust_c_file_system_lib/target/universal/android/arm64-v8a/librn_file_system.so android/libs/arm64-v8a/ && cp ../rust_c_file_system_lib/target/universal/android/armeabi-v7a/librn_file_system.so android/libs/armeabi-v7a/ && cp ../rust_c_file_system_lib/target/universal/android/x86/librn_file_system.so android/libs/x86/ && cp ../rust_c_file_system_lib/target/universal/android/x86_64/librn_file_system.so android/libs/x86_64/ && cp ../rust_c_file_system_lib/include/rust_c_file_system.h cpp/",
-    "copy-clib-mac": "mkdir -p mac && cp ../rust_c_file_system_lib/target/release/librn_file_system.a mac/ && cp ../rust_c_file_system_lib/include/rust_c_file_system.h cpp/"
+    "copy-clib-ios": "rm -rf ios/Frameworks/RustFileSystem.xcframework && mkdir -p ios/Frameworks && cp -R rust-bundle/target/xcframework/RustFileSystem.xcframework ios/Frameworks/",
+    "copy-clib-android": "mkdir -p android/libs/arm64-v8a android/libs/armeabi-v7a android/libs/x86 android/libs/x86_64 && cp rust-bundle/target/universal/android/arm64-v8a/librn_file_system.so android/libs/arm64-v8a/ && cp rust-bundle/target/universal/android/armeabi-v7a/librn_file_system.so android/libs/armeabi-v7a/ && cp rust-bundle/target/universal/android/x86/librn_file_system.so android/libs/x86/ && cp rust-bundle/target/universal/android/x86_64/librn_file_system.so android/libs/x86_64/ && cp rust-bundle/include/rust_c_file_system.h cpp/",
+    "copy-clib-mac": "mkdir -p mac && cp rust-bundle/target/release/librn_file_system.a mac/ && cp rust-bundle/include/rust_c_file_system.h cpp/"
   },
   "keywords": [
     "react-native",
