@@ -7,3 +7,9 @@ lib
 .yarn
 mac/
 package-lock.json
+*.tgz
+*.log
+rust-bundle/target/
+android/libs/
+ios/Frameworks/
+
