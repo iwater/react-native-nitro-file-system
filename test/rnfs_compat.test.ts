@@ -129,6 +129,11 @@ describe('rnfs-compat layer', () => {
         await rnfs.mkdir('/doc/sub');
         expect(mockHybrid.mkdir).toHaveBeenCalledWith('/doc/sub', 0o777, true);
 
+        mockHybrid.stat.mockClear();
+        const names = await rnfs.readdir('/doc');
+        expect(names).toEqual(['a.txt']);
+        expect(mockHybrid.stat).not.toHaveBeenCalled();
+
         const entries = await rnfs.readDir('/doc');
         expect(entries).toHaveLength(1);
         expect(entries[0].name).toBe('a.txt');
@@ -156,6 +161,15 @@ describe('rnfs-compat layer', () => {
         await rnfs.copyFileAssets('/fonts/custom.ttf', '/doc/font2.ttf');
         expect(mockHybrid.copyFile).toHaveBeenCalledWith('asset://fonts/custom.ttf', '/doc/font2.ttf', 0);
         expect(backing['/doc/font2.ttf'].toString('utf8')).toBe('asset-data');
+
+        // file:///android_asset/ equivalence across RNFS APIs
+        expect(await rnfs.exists('file:///android_asset/fonts/custom.ttf')).toBe(true);
+        expect(await rnfs.existsAssets('file:///android_asset/fonts/custom.ttf')).toBe(true);
+        expect(await rnfs.readFile('file:///android_asset/fonts/custom.ttf', 'utf8')).toBe('asset-data');
+        await rnfs.copyFile('file:///android_asset/fonts/custom.ttf', '/doc/font3.ttf');
+        expect(mockHybrid.copyFile).toHaveBeenCalledWith('asset://fonts/custom.ttf', '/doc/font3.ttf', 0);
+        await rnfs.copyFileAssets('file:///android_asset/fonts/custom.ttf', '/doc/font4.ttf');
+        expect(mockHybrid.copyFile).toHaveBeenCalledWith('asset://fonts/custom.ttf', '/doc/font4.ttf', 0);
 
         // EXDEV rename fallback -> cp + rm
         backing['/doc/exdev.txt'] = Buffer.from('cross', 'utf8');

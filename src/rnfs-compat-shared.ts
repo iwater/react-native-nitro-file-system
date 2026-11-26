@@ -65,6 +65,31 @@ function joinChildPath(dirPath: string, name: string): string {
 
 function toAssetUri(filepath: string): string {
     if (filepath.startsWith('asset://')) return filepath;
+    if (
+        filepath === '/android_asset' ||
+        filepath === '/android_asset/' ||
+        filepath.startsWith('/android_asset/') ||
+        filepath.startsWith('file:///android_asset') ||
+        filepath.startsWith('file:/android_asset')
+    ) {
+        let raw = filepath;
+        if (raw.startsWith('file://')) {
+            raw = raw.slice(7);
+        } else if (raw.startsWith('file:/')) {
+            raw = raw.slice(5);
+        }
+        try {
+            raw = decodeURIComponent(raw);
+        } catch {
+            // keep raw when percent sequence is malformed
+        }
+        if (raw === '/android_asset' || raw === '/android_asset/') {
+            return 'asset://';
+        }
+        if (raw.startsWith('/android_asset/')) {
+            return `asset://${raw.slice('/android_asset/'.length)}`;
+        }
+    }
     const trimmed = filepath.replace(/^\/+/, '');
     return `asset://${trimmed}`;
 }
@@ -118,6 +143,10 @@ export function createRnfsCompat(fs: RnfsBackingFs) {
                 else resolve();
             });
         });
+    }
+
+    async function readdir(dirpath: string): Promise<string[]> {
+        return fs.promises.readdir(dirpath);
     }
 
     async function readDir(dirpath: string): Promise<ReadDirItem[]> {
@@ -214,6 +243,7 @@ export function createRnfsCompat(fs: RnfsBackingFs) {
         appendFile,
         unlink,
         mkdir,
+        readdir,
         readDir,
         stat,
         copyFile,

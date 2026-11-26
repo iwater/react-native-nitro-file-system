@@ -28,6 +28,7 @@ export const {
     appendFile,
     unlink,
     mkdir,
+    readdir,
     readDir,
     stat,
     copyFile,
