@@ -77,7 +77,8 @@ console.log(Paths.externalCache);   // (Android only) External caches directory
 console.log(Paths.externalStorage); // (Android only) External storage root directory
 
 // Standard URIs (file:/// or asset://)
-console.log(Paths.bundleUri);        // iOS: file:///.../MyApp.app | Android: asset://
+console.log(Paths.bundleUri);        // iOS: file:///.../MyApp.app/ | Android: asset://
+console.log(Paths.bundleAssetUri);   // iOS: file:///.../MyApp.app/ | Android: file:///android_asset/
 console.log(Paths.documentUri);      // file:///.../Documents
 console.log(Paths.cacheUri);         // file:///.../Caches
 console.log(Paths.tempUri);          // file:///.../tmp
@@ -100,6 +101,7 @@ console.log(Paths.totalDiskSpace);     // Total filesystem capacity in bytes
 | `external` | Android | Absolute path to the external files directory. |
 | `externalStorage`| Android | Absolute path to the external storage root directory. |
 | `bundleUri` | All | URI representation of app resources (`file://...` on iOS, `asset://` on Android). |
+| `bundleAssetUri` | All | Platform UI/media-ready bundle URI (`file://...` on iOS, `file:///android_asset/` on Android). |
 | `documentUri` | All | Standard `file://` URI for the document directory. |
 | `cacheUri` | All | Standard `file://` URI for the cache directory. |
 | `tempUri` | All | Standard `file://` URI for the temp directory. |
@@ -281,8 +283,10 @@ if (fs.existsSync('asset://models/default.bin')) {
 ```
 
 **Note**: `asset://` is supported on both **Android** and **iOS**:
-- On **Android**, it accesses binary data directly from the APK via `AssetManager`.
-- On **iOS**, it automatically maps to the app's `Main Bundle` directory.
+- On **Android**, it accesses binary data directly from the APK via `AssetManager` (including `readFile`, `stat`, `access`, `readdir`, `opendir`, `open`/`read`/`readv`/`fstat`/`close`, `createReadStream`, `copyFile`, `cp`, `hashFile`, and `realpath`).
+- Android `file:///android_asset/...` (and `/android_asset/...`) inputs are automatically normalized to `asset://...` by `normalizePath` and the C++ native layer, so UI/media URIs can be passed straight back into `fs` / `fs/promises` / `rnfs-compat`.
+- Use `getBundleAssetUri(relPath)` or `toPlatformAssetUri(uri)` (or `Paths.bundleAssetUri`) when passing bundled asset URIs to UI/media components (`<Image>`, `expo-image`, `WebView`, video players) — on Android they produce `file:///android_asset/...`, while `Paths.bundleUri` keeps `asset://`.
+- On **iOS**, `asset://` automatically maps to the app's `Main Bundle` directory.
 
 ### iOS Bookmark URI Support
 
@@ -429,6 +433,8 @@ await RNFS.mkdir(`${RNFS.DocumentDirectoryPath}/my-folder`);
 await RNFS.writeFile(`${RNFS.DocumentDirectoryPath}/test.txt`, 'Hello RNFS', 'utf8');
 const text = await RNFS.readFile(`${RNFS.DocumentDirectoryPath}/test.txt`, 'utf8');
 const exists = await RNFS.exists(`${RNFS.DocumentDirectoryPath}/test.txt`);
+const names = await RNFS.readdir(RNFS.DocumentDirectoryPath); // string[]
+const items = await RNFS.readDir(RNFS.DocumentDirectoryPath); // ReadDirItem[]
 
 // 3. Copy and Move (automatically handles EXDEV cross-device renames)
 await RNFS.copyFile(`${RNFS.DocumentDirectoryPath}/test.txt`, `${RNFS.CachesDirectoryPath}/copy.txt`);

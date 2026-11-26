@@ -77,7 +77,8 @@ console.log(Paths.externalCache);   // (Android) 外部缓存目录
 console.log(Paths.externalStorage); // (Android) 外部存储根目录
 
 // 标准 URI 格式 (以 file:/// 开头，或 Android asset://)
-console.log(Paths.bundleUri);        // iOS: file:///.../MyApp.app | Android: asset://
+console.log(Paths.bundleUri);        // iOS: file:///.../MyApp.app/ | Android: asset://
+console.log(Paths.bundleAssetUri);   // iOS: file:///.../MyApp.app/ | Android: file:///android_asset/
 console.log(Paths.documentUri);      // file:///.../Documents
 console.log(Paths.cacheUri);         // file:///.../Caches
 console.log(Paths.tempUri);          // file:///.../tmp
@@ -100,6 +101,7 @@ console.log(Paths.totalDiskSpace);     // 总磁盘空间（字节）
 | `external` | Android | 外部文件目录的绝对物理路径。 |
 | `externalStorage`| Android | 外部存储根目录的绝对物理路径。 |
 | `bundleUri` | 全平台 | Bundle 资源的 URI 格式（iOS 为 `file://...`，Android 为 `asset://`）。 |
+| `bundleAssetUri` | 全平台 | 供 UI/媒体组件直接消费的 Bundle URI（iOS 为 `file://...`，Android 为 `file:///android_asset/`）。 |
 | `documentUri` | 全平台 | 文档目录的标准 `file://` URI。 |
 | `cacheUri` | 全平台 | 缓存目录的标准 `file://` URI。 |
 | `tempUri` | 全平台 | 临时目录的标准 `file://` URI。 |
@@ -260,6 +262,8 @@ console.log(stats.size);
 - **路径格式**：使用 `asset://` 后接相对于 assets 或 bundle 根目录的路径。
 - **目录支持**：支持通过 `fs.readdir` 列出资产目录，或使用 `fs.cp` **递归复制**整个资产目录。
 - **copyFile 支持**：支持在 `fs.cp` 和 `fs.copyFile` 中将 `asset://` 作为**源路径**（source），方便将内置资源释放到可写目录。
+- **全链路兼容**：Android 侧同时支持 `asset://...` 与 `file:///android_asset/...`（含 `/android_asset/...`）入参（覆盖 `readFile`、`stat`、`access`、`readdir`、`opendir`、`open`/`read`/`readv`/`fstat`/`close`、`createReadStream`、`copyFile`、`cp`、`hashFile`、`realpath`）。
+- **UI/媒体 URI 导出**：`Paths.bundleUri` 在 Android 上保持 `asset://` 契约不变；传给 `<Image>` / `expo-image` / `WebView` / 音视频组件时，可使用 `Paths.bundleAssetUri`、`getBundleAssetUri(relPath)` 或 `toPlatformAssetUri(uri)` 获取 Android `file:///android_asset/...` / iOS `file:///.../MyApp.app/...` 形式，且该返回值可直接回传 `fs` 读取。
 
 ```typescript
 import fs from 'react-native-nitro-file-system';
@@ -425,6 +429,8 @@ await RNFS.mkdir(`${RNFS.DocumentDirectoryPath}/my-folder`);
 await RNFS.writeFile(`${RNFS.DocumentDirectoryPath}/test.txt`, 'Hello RNFS', 'utf8');
 const text = await RNFS.readFile(`${RNFS.DocumentDirectoryPath}/test.txt`, 'utf8');
 const exists = await RNFS.exists(`${RNFS.DocumentDirectoryPath}/test.txt`);
+const names = await RNFS.readdir(RNFS.DocumentDirectoryPath); // string[]
+const items = await RNFS.readDir(RNFS.DocumentDirectoryPath); // ReadDirItem[]
 
 // 3. 复制与移动 (跨文件系统自动处理)
 await RNFS.copyFile(`${RNFS.DocumentDirectoryPath}/test.txt`, `${RNFS.CachesDirectoryPath}/copy.txt`);
