@@ -3,7 +3,7 @@
 // Keep this as `stream` rather than raw `readable-stream` so `instanceof` checks
 // across packages share the same Readable prototype.
 import { Readable, ReadableOptions } from 'stream';
-import { NitroFileSystem } from './native';
+import { NitroFileSystem, nodeFsError } from './native';
 import { Buffer } from 'react-native-nitro-buffer';
 import { getFlags, PathLike, normalizePath } from './index';
 
@@ -73,7 +73,7 @@ export class ReadStream extends Readable {
                     const normalizedPath = (this.path instanceof Buffer) ? this.path.toString() : normalizePath(this.path);
                     const fd = NitroFileSystem.open(normalizedPath, flagNum, this.mode);
                     if (fd < 0) {
-                        this.emit('error', new Error(`ENOENT: no such file or directory, open '${normalizedPath}'`));
+                        this.emit('error', nodeFsError('open', normalizedPath));
                         this._fileClosed = true;
                         return;
                     }
@@ -125,6 +125,9 @@ export class ReadStream extends Readable {
                 this.bytesRead += bytesRead;
                 this.pos += bytesRead;
                 this.push(buffer.slice(0, bytesRead));
+            } else if (bytesRead < 0) {
+                const p = (this.path instanceof Buffer) ? this.path.toString() : normalizePath(this.path);
+                this.emit('error', nodeFsError('read', p));
             } else {
                 this.push(null);
             }

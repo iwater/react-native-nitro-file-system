@@ -35,6 +35,7 @@ export interface NitroPaths {
     pictures: string;
     temp: string;
     bundleUri: string;
+    bundleAssetUri: string;
     documentUri: string;
     cacheUri: string;
     tempUri: string;
@@ -367,19 +368,52 @@ function safeDecodeURIComponent(value: string): string {
     }
 }
 
+function encodeUriPathSegments(path: string): string {
+    if (!path) return '';
+    return path
+        .split('/')
+        .map((seg) => encodeURIComponent(seg))
+        .join('/');
+}
+
+const ANDROID_ASSET_PREFIX = '/android_asset';
+
+function androidAssetPathToUri(path: string): string | null {
+    if (path === ANDROID_ASSET_PREFIX || path === `${ANDROID_ASSET_PREFIX}/`) {
+        return 'asset://';
+    }
+    if (path.startsWith(`${ANDROID_ASSET_PREFIX}/`)) {
+        return `asset://${path.slice(ANDROID_ASSET_PREFIX.length + 1)}`;
+    }
+    return null;
+}
+
+function extractFileUriRawPath(raw: string): string | null {
+    if (raw.startsWith('file://')) {
+        return safeDecodeURIComponent(raw.substring(7));
+    }
+    if (raw.startsWith('file:/')) {
+        return safeDecodeURIComponent(raw.substring(5));
+    }
+    return null;
+}
+
 export function normalizePath(path: PathLike): string {
     if (typeof path === 'object' && path instanceof URL) {
         if (path.protocol !== 'file:') {
             return path.toString();
         }
-        return safeDecodeURIComponent(path.pathname);
+        const decoded = safeDecodeURIComponent(path.pathname);
+        return androidAssetPathToUri(decoded) ?? decoded;
     }
     if (typeof path === 'string') {
-        if (path.startsWith('file://')) {
-            return safeDecodeURIComponent(path.substring(7));
+        const filePath = extractFileUriRawPath(path);
+        if (filePath !== null) {
+            return androidAssetPathToUri(filePath) ?? filePath;
         }
-        if (path.startsWith('file:/')) {
-            return safeDecodeURIComponent(path.substring(5));
+        const assetUri = androidAssetPathToUri(path);
+        if (assetUri !== null) {
+            return assetUri;
         }
     }
     return path as string;
@@ -396,15 +430,91 @@ export function toFileUri(path: PathLike): string {
     if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw) && !raw.startsWith('file://')) {
         return raw;
     }
-    const physical = (raw.startsWith('file://') || raw.startsWith('file:/'))
-        ? normalizePath(raw)
-        : raw;
+    const physical = extractFileUriRawPath(raw) ?? raw;
     const normalized = physical.startsWith('/') ? physical : `/${physical}`;
-    const encoded = normalized
-        .split('/')
-        .map((seg) => encodeURIComponent(seg))
-        .join('/');
-    return `file://${encoded}`;
+    return `file://${encodeUriPathSegments(normalized)}`;
+}
+
+function ensureTrailingSlash(uri: string): string {
+    if (!uri) return '';
+    return uri.endsWith('/') ? uri : `${uri}/`;
+}
+
+function joinUriWithRelPath(baseUri: string, relPath: string): string {
+    if (!baseUri) return '';
+    const base = ensureTrailingSlash(baseUri);
+    const clean = relPath.replace(/^\/+/, '');
+    if (!clean) return base;
+    return `${base}${encodeUriPathSegments(clean)}`;
+}
+
+export function deriveBundleAssetUri(bundleUri: string): string {
+    if (!bundleUri) return '';
+    if (bundleUri.startsWith('asset://')) {
+        return 'file:///android_asset/';
+    }
+    return ensureTrailingSlash(bundleUri);
+}
+
+export function createBundleAssetHelpers(bundleUri: string) {
+    const bundleAssetUri = deriveBundleAssetUri(bundleUri);
+
+    function toPlatformAssetUri(uri: PathLike): string {
+        if (!uri) return '';
+        const raw = typeof uri === 'object' && uri instanceof URL ? uri.toString() : String(uri);
+        if (!raw) return '';
+
+        let assetRelPath: string | null = null;
+        if (raw.startsWith('asset://')) {
+            assetRelPath = safeDecodeURIComponent(raw.slice(8)).replace(/^\/+/, '');
+        } else {
+            const filePath = extractFileUriRawPath(raw);
+            const candidate = filePath ?? raw;
+            const asAssetUri = androidAssetPathToUri(candidate);
+            if (asAssetUri !== null) {
+                assetRelPath = asAssetUri.slice(8).replace(/^\/+/, '');
+            }
+        }
+
+        if (assetRelPath !== null) {
+            if (bundleUri.startsWith('asset://')) {
+                return joinUriWithRelPath('file:///android_asset/', assetRelPath);
+            }
+            if (bundleAssetUri) {
+                return joinUriWithRelPath(bundleAssetUri, assetRelPath);
+            }
+            return raw.startsWith('file://') ? toFileUri(raw) : raw;
+        }
+
+        if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) {
+            if (raw.startsWith('file://') || raw.startsWith('file:/')) {
+                return toFileUri(raw);
+            }
+            return raw;
+        }
+
+        return toFileUri(raw);
+    }
+
+    function getBundleAssetUri(relPath: string = ''): string {
+        if (!relPath) {
+            return bundleAssetUri;
+        }
+        if (
+            relPath.startsWith('asset://') ||
+            androidAssetPathToUri(extractFileUriRawPath(relPath) ?? relPath) !== null ||
+            /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(relPath)
+        ) {
+            return toPlatformAssetUri(relPath);
+        }
+        return joinUriWithRelPath(bundleAssetUri, relPath);
+    }
+
+    return {
+        bundleAssetUri,
+        toPlatformAssetUri,
+        getBundleAssetUri,
+    };
 }
 
 export function toBigIntStatFs(s: StatFs): BigIntStatFs {

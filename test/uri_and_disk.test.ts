@@ -63,12 +63,34 @@ describe('URI helpers, Paths, statfs, and hashFile', () => {
         expect(fs.toFileUri('bookmark://opaque-token')).toBe('bookmark://opaque-token');
         expect(fs.toFileUri('asset://fonts/roboto.ttf')).toBe('asset://fonts/roboto.ttf');
 
+        // Android file:///android_asset/ and /android_asset/ input normalization
+        expect(fs.normalizePath('file:///android_asset/fonts/My%20Font.ttf')).toBe('asset://fonts/My Font.ttf');
+        expect(fs.normalizePath('file:/android_asset/fonts/roboto.ttf')).toBe('asset://fonts/roboto.ttf');
+        expect(fs.normalizePath(new URL('file:///android_asset/images/cover%201.png'))).toBe('asset://images/cover 1.png');
+        expect(fs.normalizePath('/android_asset/images/cover.png')).toBe('asset://images/cover.png');
+        expect(fs.normalizePath('file:///android_asset/')).toBe('asset://');
+        expect(fs.normalizePath('file:///android_asset')).toBe('asset://');
+        expect(fs.normalizePath('/android_asset/')).toBe('asset://');
+        expect(fs.normalizePath('/android_asset')).toBe('asset://');
+        expect(fs.toFileUri('file:///android_asset/images/cover%201.png')).toBe('file:///android_asset/images/cover%201.png');
+        expect(fs.toFileUri('/android_asset/images/cover 1.png')).toBe('file:///android_asset/images/cover%201.png');
+
         // Paths properties & non-enumerable disk getters
         expect(fs.bundleUri).toBe('file:///Applications/Demo.app');
         expect(fs.Paths.bundleUri).toBe('file:///Applications/Demo.app');
+        expect(fs.Paths.bundleAssetUri).toBe('file:///Applications/Demo.app/');
         expect(fs.Paths.documentUri).toBe('file:///var/mobile/Documents%20with%20space');
         expect(fs.Paths.cacheUri).toBe('file:///var/mobile/Caches');
         expect(fs.Paths.tempUri).toBe('file:///tmp');
+
+        // Platform asset URI helpers on iOS
+        expect(fs.getBundleAssetUri()).toBe('file:///Applications/Demo.app/');
+        expect(fs.getBundleAssetUri('images/cover 1.png')).toBe('file:///Applications/Demo.app/images/cover%201.png');
+        expect(fs.getBundleAssetUri('/images/cover#1.png')).toBe('file:///Applications/Demo.app/images/cover%231.png');
+        expect(fs.toPlatformAssetUri('asset://images/cover%201.png')).toBe('file:///Applications/Demo.app/images/cover%201.png');
+        expect(fs.toPlatformAssetUri('file:///android_asset/images/cover%201.png')).toBe('file:///Applications/Demo.app/images/cover%201.png');
+        expect(fs.toPlatformAssetUri('https://example.com/a.png')).toBe('https://example.com/a.png');
+        expect(fs.toPlatformAssetUri('data:image/png;base64,AAA')).toBe('data:image/png;base64,AAA');
 
         expect(Object.keys(fs.Paths)).not.toContain('availableDiskSpace');
         expect(Object.keys(fs.Paths)).not.toContain('totalDiskSpace');
@@ -149,6 +171,39 @@ describe('URI helpers, Paths, statfs, and hashFile', () => {
 
         await expect(fs.promises.hashFile('asset://data/test.bin', 'sha512')).resolves.toBe('async-sha512-hash');
         expect(mockHybrid.hashFile).toHaveBeenCalledWith('asset://data/test.bin', 'sha512');
+
+        await expect(fs.promises.hashFile('file:///android_asset/data/test%201.bin', 'md5')).resolves.toBe('async-md5-hash');
+        expect(mockHybrid.hashFile).toHaveBeenCalledWith('asset://data/test 1.bin', 'md5');
+    });
+
+    it('keeps Paths.bundleUri as asset:// on Android while exposing file:///android_asset/ helpers', () => {
+        const mockHybrid = createMockHybrid({ bundleUri: 'asset://' });
+        jest.doMock('react-native-nitro-modules', () => ({
+            NitroModules: { createHybridObject: () => mockHybrid },
+        }));
+        jest.doMock('react-native-nitro-buffer', () => ({ Buffer: globalThis.Buffer }));
+
+        const fs = require('../src/index');
+
+        expect(fs.bundleUri).toBe('asset://');
+        expect(fs.Paths.bundleUri).toBe('asset://');
+        expect(fs.Paths.bundleAssetUri).toBe('file:///android_asset/');
+
+        expect(fs.getBundleAssetUri()).toBe('file:///android_asset/');
+        expect(fs.getBundleAssetUri('images/cover 1.png')).toBe('file:///android_asset/images/cover%201.png');
+        expect(fs.getBundleAssetUri('/fonts/My Font#1.ttf')).toBe('file:///android_asset/fonts/My%20Font%231.ttf');
+        expect(fs.toPlatformAssetUri('asset://images/cover%201.png')).toBe('file:///android_asset/images/cover%201.png');
+        expect(fs.toPlatformAssetUri('asset://')).toBe('file:///android_asset/');
+        expect(fs.toPlatformAssetUri('file:///android_asset/images/cover%201.png')).toBe('file:///android_asset/images/cover%201.png');
+        expect(fs.toPlatformAssetUri('/android_asset/images/cover 1.png')).toBe('file:///android_asset/images/cover%201.png');
+        expect(fs.toPlatformAssetUri('/data/user/0/app/files/local file.png')).toBe('file:///data/user/0/app/files/local%20file.png');
+        expect(fs.toPlatformAssetUri('content://media/external/images/1')).toBe('content://media/external/images/1');
+
+        // Round-trip: UI URI can be passed straight back into fs APIs
+        const uiUri = fs.getBundleAssetUri('data/test 1.bin');
+        expect(uiUri).toBe('file:///android_asset/data/test%201.bin');
+        expect(fs.hashFileSync(uiUri, 'sha256')).toBe('sync-sha256-hash');
+        expect(mockHybrid.hashFileSync).toHaveBeenCalledWith('asset://data/test 1.bin', 'sha256');
     });
 });
 

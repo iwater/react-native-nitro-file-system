@@ -10,6 +10,7 @@ import {
     normalizePath,
     toFileUri,
     toBigIntStatFs,
+    createBundleAssetHelpers,
 } from './shared'
 import type {
     PathLike,
@@ -105,6 +106,9 @@ export const constants: FsConstants = {
 } as FsConstants;
 export const FileProtectionKeys = NitroFileSystem.fileProtectionKeys;
 export const bundleUri: string = NitroFileSystem.bundleUri;
+const _bundleAssetHelpers = createBundleAssetHelpers(bundleUri);
+export const toPlatformAssetUri = _bundleAssetHelpers.toPlatformAssetUri;
+export const getBundleAssetUri = _bundleAssetHelpers.getBundleAssetUri;
 
 function getDefaultDiskSpace(): StatFs {
     const candidates = [
@@ -135,6 +139,7 @@ export const Paths: NitroPaths = {
     pictures: NitroFileSystem.picturesDirectoryPath,
     temp: NitroFileSystem.temporaryDirectoryPath,
     bundleUri: NitroFileSystem.bundleUri,
+    bundleAssetUri: _bundleAssetHelpers.bundleAssetUri,
     documentUri: toFileUri(NitroFileSystem.documentDirectoryPath),
     cacheUri: toFileUri(NitroFileSystem.cachesDirectoryPath),
     tempUri: toFileUri(NitroFileSystem.temporaryDirectoryPath),
@@ -2142,6 +2147,8 @@ export default {
     FileProtectionKeys,
     bundleUri,
     toFileUri,
+    toPlatformAssetUri,
+    getBundleAssetUri,
     normalizePath,
     getFlags,
 };

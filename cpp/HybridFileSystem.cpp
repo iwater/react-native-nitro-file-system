@@ -5,15 +5,19 @@
 #include "rust_c_file_system.h"
 #include <array>
 #include <cerrno>
+#include <climits>
 #include <cstdio>
 #include <exception>
 #include <fcntl.h>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
+#include <unordered_map>
 
 #ifndef __APPLE__
 #include <sys/statvfs.h>
@@ -226,6 +230,72 @@ void accessAsset(const std::string& assetPath, int mode) {
     }
     (void)statAsset(assetPath);
 }
+
+struct AndroidAssetFd {
+    AAsset* asset;
+    int64_t pos;
+    int64_t length;
+    bool isDir;
+    std::mutex ioMutex;
+};
+
+static constexpr int kAndroidAssetFdMin = 1000000000;
+static std::mutex gAssetFdMutex;
+static std::unordered_map<int, std::shared_ptr<AndroidAssetFd>> gAssetFds;
+static int gNextAssetFd = kAndroidAssetFdMin;
+
+static int registerAssetFd(AAsset* asset, int64_t length, bool isDir) {
+    auto handle = std::make_shared<AndroidAssetFd>();
+    handle->asset = asset;
+    handle->pos = 0;
+    handle->length = length;
+    handle->isDir = isDir;
+
+    std::lock_guard<std::mutex> lock(gAssetFdMutex);
+    while (gAssetFds.find(gNextAssetFd) != gAssetFds.end()) {
+        gNextAssetFd = (gNextAssetFd >= INT_MAX - 1) ? kAndroidAssetFdMin : (gNextAssetFd + 1);
+    }
+    int fd = gNextAssetFd;
+    gNextAssetFd = (gNextAssetFd >= INT_MAX - 1) ? kAndroidAssetFdMin : (gNextAssetFd + 1);
+    gAssetFds.emplace(fd, std::move(handle));
+    return fd;
+}
+
+static std::shared_ptr<AndroidAssetFd> findAssetFd(int fd) {
+    if (fd < kAndroidAssetFdMin) {
+        return nullptr;
+    }
+    std::lock_guard<std::mutex> lock(gAssetFdMutex);
+    auto it = gAssetFds.find(fd);
+    if (it == gAssetFds.end()) {
+        return nullptr;
+    }
+    return it->second;
+}
+
+static bool closeAssetFd(int fd) {
+    if (fd < kAndroidAssetFdMin) {
+        return false;
+    }
+    std::shared_ptr<AndroidAssetFd> handle;
+    {
+        std::lock_guard<std::mutex> lock(gAssetFdMutex);
+        auto it = gAssetFds.find(fd);
+        if (it == gAssetFds.end()) {
+            return false;
+        }
+        handle = std::move(it->second);
+        gAssetFds.erase(it);
+    }
+    if (handle) {
+        std::lock_guard<std::mutex> ioLock(handle->ioMutex);
+        if (handle->asset != nullptr) {
+            AAsset_close(handle->asset);
+            handle->asset = nullptr;
+        }
+    }
+    return true;
+}
 #endif
 
 Stats toStats(const RNStats &s) {
@@ -242,6 +312,42 @@ double HybridFileSystem::open(const std::string &rawPath, double flags,
   std::string path = normalizePath(rawPath);
 
 #ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    int flagsInt = static_cast<int>(flags);
+    int accMode = flagsInt & O_ACCMODE;
+    if (accMode != O_RDONLY || (flagsInt & (O_CREAT | O_TRUNC | O_APPEND)) != 0) {
+      rn_fs_set_errno(EACCES);
+      return -1;
+    }
+    if (gAssetManager == nullptr) {
+      rn_fs_set_errno(EIO);
+      return -1;
+    }
+    std::string clean = cleanAssetRelPath(getAssetPath(path));
+    AAsset *asset = (clean.empty() || clean == ".")
+        ? nullptr
+        : AAssetManager_open(gAssetManager, clean.c_str(), AASSET_MODE_RANDOM);
+    bool isDir = false;
+    int64_t length = 0;
+    if (asset == nullptr) {
+      if (clean.empty() || clean == "." || !listAssetsJava(clean).empty()) {
+        isDir = true;
+      } else {
+        rn_fs_set_errno(ENOENT);
+        return -1;
+      }
+    } else {
+      if ((flagsInt & O_DIRECTORY) != 0) {
+        AAsset_close(asset);
+        rn_fs_set_errno(ENOTDIR);
+        return -1;
+      }
+      off64_t assetLen = AAsset_getLength64(asset);
+      length = assetLen < 0 ? 0 : static_cast<int64_t>(assetLen);
+    }
+    return static_cast<double>(registerAssetFd(asset, length, isDir));
+  }
+
   if (path.find("content://") == 0) {
     JNIEnv *env = getJNIEnv();
     if (env) {
@@ -311,7 +417,14 @@ double HybridFileSystem::open(const std::string &rawPath, double flags,
                     static_cast<int>(mode));
 }
 
-void HybridFileSystem::close(double fd) { rn_fs_close(static_cast<int>(fd)); }
+void HybridFileSystem::close(double fd) {
+#ifdef __ANDROID__
+  if (closeAssetFd(static_cast<int>(fd))) {
+    return;
+  }
+#endif
+  rn_fs_close(static_cast<int>(fd));
+}
 
 double HybridFileSystem::read(double fd,
                               const std::shared_ptr<ArrayBuffer> &buffer,
@@ -329,6 +442,36 @@ double HybridFileSystem::read(double fd,
   }
 
   uint8_t *data = buffer->data() + static_cast<size_t>(offset);
+#ifdef __ANDROID__
+  if (auto assetHandle = findAssetFd(static_cast<int>(fd))) {
+    if (assetHandle->isDir) {
+      rn_fs_set_errno(EISDIR);
+      return -1;
+    }
+    size_t reqLen = static_cast<size_t>(length);
+    if (reqLen == 0) {
+      return 0;
+    }
+    std::lock_guard<std::mutex> lock(assetHandle->ioMutex);
+    int64_t targetPos = (position >= 0) ? static_cast<int64_t>(position) : assetHandle->pos;
+    if (targetPos >= assetHandle->length) {
+      return 0;
+    }
+    if (AAsset_seek64(assetHandle->asset, static_cast<off64_t>(targetPos), SEEK_SET) < 0) {
+      rn_fs_set_errno(EIO);
+      return -1;
+    }
+    int bytesRead = AAsset_read(assetHandle->asset, data, reqLen);
+    if (bytesRead < 0) {
+      rn_fs_set_errno(EIO);
+      return -1;
+    }
+    if (position < 0) {
+      assetHandle->pos = targetPos + bytesRead;
+    }
+    return static_cast<double>(bytesRead);
+  }
+#endif
   return rn_fs_read(static_cast<int>(fd), data, static_cast<size_t>(length),
                     static_cast<int64_t>(position));
 }
@@ -347,6 +490,13 @@ double HybridFileSystem::write(double fd,
     rn_fs_set_errno(EINVAL);
     return -1;
   }
+
+#ifdef __ANDROID__
+  if (findAssetFd(static_cast<int>(fd)) != nullptr) {
+    rn_fs_set_errno(EBADF);
+    return -1;
+  }
+#endif
 
   uint8_t *data = buffer->data() + static_cast<size_t>(offset);
 
@@ -403,12 +553,24 @@ void HybridFileSystem::truncate(const std::string &rawPath, double len) {
 }
 
 void HybridFileSystem::ftruncate(double fd, double len) {
+#ifdef __ANDROID__
+  if (findAssetFd(static_cast<int>(fd)) != nullptr) {
+    rn_fs_set_errno(EINVAL);
+    throw std::runtime_error("ftruncate failed");
+  }
+#endif
   if (rn_fs_ftruncate(static_cast<int>(fd), static_cast<size_t>(len)) != 0) {
     throw std::runtime_error("ftruncate failed");
   }
 }
 
 void HybridFileSystem::fsync(double fd) {
+#ifdef __ANDROID__
+  if (findAssetFd(static_cast<int>(fd)) != nullptr) {
+    rn_fs_set_errno(EINVAL);
+    throw std::runtime_error("fsync failed");
+  }
+#endif
   if (rn_fs_fsync(static_cast<int>(fd)) != 0) {
     throw std::runtime_error("fsync failed");
   }
@@ -429,6 +591,12 @@ void HybridFileSystem::lchmod(const std::string &rawPath, double mode) {
 }
 
 void HybridFileSystem::fchmod(double fd, double mode) {
+#ifdef __ANDROID__
+  if (findAssetFd(static_cast<int>(fd)) != nullptr) {
+    rn_fs_set_errno(EROFS);
+    throw std::runtime_error("fchmod failed");
+  }
+#endif
   if (rn_fs_fchmod(static_cast<int>(fd), static_cast<int>(mode)) != 0) {
     throw std::runtime_error("fchmod failed");
   }
@@ -451,6 +619,12 @@ void HybridFileSystem::lchown(const std::string &rawPath, double uid, double gid
 }
 
 void HybridFileSystem::fchown(double fd, double uid, double gid) {
+#ifdef __ANDROID__
+  if (findAssetFd(static_cast<int>(fd)) != nullptr) {
+    rn_fs_set_errno(EROFS);
+    throw std::runtime_error("fchown failed");
+  }
+#endif
   if (rn_fs_fchown(static_cast<int>(fd), static_cast<int>(uid),
                    static_cast<int>(gid)) != 0) {
     throw std::runtime_error("fchown failed");
@@ -476,6 +650,12 @@ void HybridFileSystem::lutimes(const std::string &rawPath, double atime,
 }
 
 void HybridFileSystem::futimes(double fd, double atime, double mtime) {
+#ifdef __ANDROID__
+  if (findAssetFd(static_cast<int>(fd)) != nullptr) {
+    rn_fs_set_errno(EROFS);
+    throw std::runtime_error("futimes failed");
+  }
+#endif
   if (rn_fs_futimes(static_cast<int>(fd), atime, mtime) != 0) {
     throw std::runtime_error("futimes failed");
   }
@@ -516,6 +696,12 @@ std::string HybridFileSystem::realpath(const std::string &rawPath) {
   std::string path = normalizePath(rawPath);
 
 #ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    (void)statAsset(getAssetPath(path));
+    std::string clean = cleanAssetRelPath(getAssetPath(path));
+    return clean.empty() ? "asset://" : ("asset://" + clean);
+  }
+
   if (path.find("content://") == 0) {
     return path;
   }
@@ -655,6 +841,15 @@ Stats HybridFileSystem::lstat(const std::string &rawPath) {
 }
 
 Stats HybridFileSystem::fstat(double fd) {
+#ifdef __ANDROID__
+  if (auto assetHandle = findAssetFd(static_cast<int>(fd))) {
+    if (assetHandle->isDir) {
+      return Stats(0, 0, S_IFDIR | 0555, 1, 0, 0, 0, 0, 4096, 0, 0, 0, 0, 0);
+    }
+    return Stats(0, 0, S_IFREG | 0444, 1, 0, 0, 0,
+                 static_cast<double>(assetHandle->length), 4096, 0, 0, 0, 0, 0);
+  }
+#endif
   RNStats s;
   if (rn_fs_fstat(static_cast<int>(fd), &s) == 0) {
     return toStats(s);
@@ -1184,6 +1379,13 @@ std::shared_ptr<HybridHybridDirIteratorSpec>
 HybridFileSystem::opendir(const std::string &rawPath) {
   std::string path = normalizePath(rawPath);
 
+#ifdef __ANDROID__
+  if (isAssetPath(path)) {
+    std::vector<std::string> entries = readdirAsset(getAssetPath(path));
+    return std::make_shared<HybridDirIterator>(std::move(entries));
+  }
+#endif
+
 #ifdef __APPLE__
   if (path.find("bookmark://") == 0) {
     std::string resolvedPath;
@@ -1297,9 +1499,27 @@ std::string HybridFileSystem::getBundleUri() {
 
 std::string HybridFileSystem::normalizePath(const std::string &path) {
   if (path.find("file://") == 0) {
-    return percentDecode(path.substr(7));
+    std::string decoded = percentDecode(path.substr(7));
+#ifdef __ANDROID__
+    if (decoded == "/android_asset" || decoded == "/android_asset/") {
+      return "asset://";
+    }
+    if (decoded.rfind("/android_asset/", 0) == 0) {
+      return "asset://" + decoded.substr(15);
+    }
+#endif
+    return decoded;
   } else if (path.find("file:/") == 0) {
-    return percentDecode(path.substr(5));
+    std::string decoded = percentDecode(path.substr(5));
+#ifdef __ANDROID__
+    if (decoded == "/android_asset" || decoded == "/android_asset/") {
+      return "asset://";
+    }
+    if (decoded.rfind("/android_asset/", 0) == 0) {
+      return "asset://" + decoded.substr(15);
+    }
+#endif
+    return decoded;
   } else if (path.find("asset://") == 0) {
 #ifdef __APPLE__
     std::string relPath = percentDecode(path.substr(8));
@@ -1309,8 +1529,18 @@ std::string HybridFileSystem::normalizePath(const std::string &path) {
     if (relPath[0] == '/')
       return bundlePath + relPath;
     return bundlePath + "/" + relPath;
+#else
+    return "asset://" + percentDecode(path.substr(8));
 #endif
   }
+#ifdef __ANDROID__
+  if (path == "/android_asset" || path == "/android_asset/") {
+    return "asset://";
+  }
+  if (path.rfind("/android_asset/", 0) == 0) {
+    return "asset://" + path.substr(15);
+  }
+#endif
   return path;
 }
 
@@ -1321,6 +1551,47 @@ double HybridFileSystem::readv(
   if (buffers.empty()) {
     return 0;
   }
+
+#ifdef __ANDROID__
+  if (auto assetHandle = findAssetFd(static_cast<int>(fd))) {
+    if (assetHandle->isDir) {
+      rn_fs_set_errno(EISDIR);
+      throw std::runtime_error("readv failed");
+    }
+    std::lock_guard<std::mutex> lock(assetHandle->ioMutex);
+    int64_t targetPos = (position >= 0) ? static_cast<int64_t>(position) : assetHandle->pos;
+    int64_t totalRead = 0;
+    for (const auto &buf : buffers) {
+      if (!buf || buf->size() == 0) {
+        continue;
+      }
+      int64_t curPos = targetPos + totalRead;
+      if (curPos >= assetHandle->length) {
+        break;
+      }
+      if (AAsset_seek64(assetHandle->asset, static_cast<off64_t>(curPos), SEEK_SET) < 0) {
+        rn_fs_set_errno(EIO);
+        throw std::runtime_error("readv failed");
+      }
+      int bytesRead = AAsset_read(assetHandle->asset, buf->data(), buf->size());
+      if (bytesRead < 0) {
+        rn_fs_set_errno(EIO);
+        throw std::runtime_error("readv failed");
+      }
+      if (bytesRead == 0) {
+        break;
+      }
+      totalRead += bytesRead;
+      if (static_cast<size_t>(bytesRead) < buf->size()) {
+        break;
+      }
+    }
+    if (position < 0) {
+      assetHandle->pos = targetPos + totalRead;
+    }
+    return static_cast<double>(totalRead);
+  }
+#endif
 
   // Build iovec array
   std::vector<RNIovec> iovecs;
@@ -1356,6 +1627,13 @@ double HybridFileSystem::writev(
   if (buffers.empty()) {
     return 0;
   }
+
+#ifdef __ANDROID__
+  if (findAssetFd(static_cast<int>(fd)) != nullptr) {
+    rn_fs_set_errno(EBADF);
+    throw std::runtime_error("writev failed");
+  }
+#endif
 
   // Build iovec array
   std::vector<RNIovec> iovecs;

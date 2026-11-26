@@ -28,6 +28,7 @@ import {
     getFlagsFromConstants,
     normalizePath,
     toFileUri,
+    createBundleAssetHelpers,
 } from './shared';
 import { warnWebOnce, webNotSupportedError } from './native.web';
 
@@ -102,6 +103,9 @@ export const constants: FsConstants = {
 
 export const FileProtectionKeys: Record<string, string> = {};
 export const bundleUri: string = '';
+const _bundleAssetHelpers = createBundleAssetHelpers(bundleUri);
+export const toPlatformAssetUri = _bundleAssetHelpers.toPlatformAssetUri;
+export const getBundleAssetUri = _bundleAssetHelpers.getBundleAssetUri;
 
 export const Paths: NitroPaths = {
     cache: '',
@@ -115,6 +119,7 @@ export const Paths: NitroPaths = {
     pictures: '',
     temp: '',
     bundleUri: '',
+    bundleAssetUri: _bundleAssetHelpers.bundleAssetUri,
     documentUri: '',
     cacheUri: '',
     tempUri: '',
@@ -674,6 +679,8 @@ export default {
     FileProtectionKeys,
     bundleUri,
     toFileUri,
+    toPlatformAssetUri,
+    getBundleAssetUri,
     normalizePath,
     getFlags,
 };

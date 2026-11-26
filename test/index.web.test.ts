@@ -19,6 +19,10 @@ describe('Web platform fallback (index.web & rnfs-compat.web)', () => {
         expect(webFs.bundleUri).toBe('');
         expect(webFs.Paths.document).toBe('');
         expect(webFs.Paths.bundleUri).toBe('');
+        expect(webFs.Paths.bundleAssetUri).toBe('');
+        expect(webFs.getBundleAssetUri('images/a.png')).toBe('');
+        expect(webFs.toPlatformAssetUri('asset://images/a.png')).toBe('asset://images/a.png');
+        expect(webFs.toPlatformAssetUri('/tmp/a b.png')).toBe('file:///tmp/a%20b.png');
         expect(webFs.Paths.availableDiskSpace).toBe(0);
         expect(webFs.Paths.totalDiskSpace).toBe(0);
         expect(Object.keys(webFs.Paths)).not.toContain('availableDiskSpace');
